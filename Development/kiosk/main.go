@@ -39,6 +39,7 @@ func main() {
 		Width:            width,
 		Height:           height,
 		AlwaysOnTop:      false,
+		Frameless:        !cfg.Dev,
 		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 255},
 		AssetServer: &assetserver.Options{
 			Assets: assets,

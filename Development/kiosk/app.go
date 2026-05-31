@@ -41,10 +41,27 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
+// monitorRect gibt den Rect des konfigurierten Monitors zurück.
+// Fällt auf Monitor 0 zurück wenn der Index nicht verfügbar ist.
+func (a *App) monitorRect() (monitorRect, bool) {
+	rects := getMonitorRects()
+	if len(rects) == 0 {
+		return monitorRect{}, false
+	}
+	idx := a.currentMonitorIdx
+	if idx >= len(rects) {
+		log.Printf("[screen %d] Monitor %d nicht verfügbar (%d erkannt) — verwende Monitor 0", a.screenIdx, idx, len(rects))
+		idx = 0
+	}
+	return rects[idx], true
+}
+
 func (a *App) domReady(ctx context.Context) {
-	a.positionOnConfiguredMonitor()
-	// sync.Once stellt sicher, dass Navigation nur beim ersten domReady ausgeführt wird,
-	// nicht bei jeder weiteren Seitennavigation.
+	if a.cfg.Dev {
+		if r, ok := a.monitorRect(); ok {
+			runtime.WindowSetPosition(a.ctx, r.X, r.Y)
+		}
+	}
 	a.loadOnce.Do(func() {
 		go a.waitForServerThenLoad()
 	})
@@ -95,20 +112,9 @@ func (a *App) waitForServerThenLoad() {
 	log.Printf("[screen %d] Navigiere zu: %s", a.screenIdx, targetURL)
 	runtime.WindowExecJS(a.ctx, fmt.Sprintf("window.location.href = %q", targetURL))
 
-	// Vollbild per Win32 setzen — runtime.WindowFullscreen nutzt die Work-Area
-	// (Monitor ohne Taskleiste) und würde die Taskleiste nicht abdecken.
 	if !a.cfg.Dev {
 		time.Sleep(300 * time.Millisecond)
-		rects := getMonitorRects()
-		if idx := a.currentMonitorIdx; idx < len(rects) {
-			moveWindowFullscreenToMonitor(rects[idx])
-		}
-		runtime.WindowSetAlwaysOnTop(a.ctx, a.cfg.Kiosk.AlwaysOnTop)
-		// State an Steuerung melden — wird über connectKioskWS gesendet sobald verbunden
-		select {
-		case a.kioskSend <- map[string]any{"action": "kiosk_state", "fullscreen": true}:
-		default:
-		}
+		a.goFullscreen()
 	}
 
 	if a.screenIdx == 0 {
@@ -196,57 +202,49 @@ func (a *App) connectKioskWS() {
 	}
 }
 
+// goFullscreen setzt Vollbild und meldet den State.
+func (a *App) goFullscreen() {
+	if r, ok := a.monitorRect(); ok {
+		setWindowPos(r, true)
+	}
+	runtime.WindowSetAlwaysOnTop(a.ctx, a.cfg.Kiosk.AlwaysOnTop)
+	select {
+	case a.kioskSend <- map[string]any{"action": "kiosk_state", "fullscreen": true}:
+	default:
+	}
+}
+
+// moveWithBlackout blendet kurz ab, wechselt Monitor und blendet wieder ein.
+func (a *App) moveWithBlackout(r monitorRect) {
+	runtime.WindowExecJS(a.ctx, `window.__kioskBlackout&&window.__kioskBlackout(true)`)
+	time.Sleep(50 * time.Millisecond)
+	setWindowPos(r, true)
+	time.Sleep(80 * time.Millisecond)
+	runtime.WindowExecJS(a.ctx, `window.__kioskBlackout&&window.__kioskBlackout(false)`)
+}
+
 func (a *App) handleKioskCommand(msg map[string]any) {
 	cmd, _ := msg["command"].(string)
 	switch cmd {
-	case "fullscreen":
-		runtime.WindowSetAlwaysOnTop(a.ctx, a.cfg.Kiosk.AlwaysOnTop)
-		go func() {
-			rects := getMonitorRects()
-			if idx := a.currentMonitorIdx; idx < len(rects) {
-				moveWindowFullscreenToMonitor(rects[idx])
-			}
-		}()
-		select {
-		case a.kioskSend <- map[string]any{"action": "kiosk_state", "fullscreen": true}:
-		default:
-		}
+	case "fullscreen", "toggle_fullscreen":
+		go a.goFullscreen()
 	case "windowed":
 		select {
 		case a.kioskSend <- map[string]any{"action": "kiosk_state", "fullscreen": false}:
 		default:
 		}
 		go func() {
-			runtime.WindowUnfullscreen(a.ctx)
 			runtime.WindowSetAlwaysOnTop(a.ctx, false)
 			time.Sleep(150 * time.Millisecond)
-			rects := getMonitorRects()
-			idx := a.currentMonitorIdx
-			if idx >= len(rects) {
-				idx = 0
-			}
-			if len(rects) > 0 {
-				r := rects[idx]
-				w, h := r.W/2, r.H/2
+			if r, ok := a.monitorRect(); ok {
 				cascade := a.screenIdx * 40
-				x := r.X + cascade
-				y := r.Y + cascade
-				// Win32 direkt statt Wails-API: konsistente physikalische Koordinaten
-				// mit getMonitorRects() (EnumDisplayMonitors).
-				positionWindowWindowed(x, y, w, h)
-			}
-		}()
-	case "toggle_fullscreen":
-		go func() {
-			rects := getMonitorRects()
-			if idx := a.currentMonitorIdx; idx < len(rects) {
-				moveWindowFullscreenToMonitor(rects[idx])
+				setWindowPos(monitorRect{X: r.X + cascade, Y: r.Y + cascade, W: r.W / 2, H: r.H / 2}, false)
 			}
 		}()
 	case "move_to":
 		screenF, _ := msg["screen"].(float64)
 		if int(screenF) != a.screenIdx {
-			return // Befehl gilt für ein anderes Fenster
+			return
 		}
 		monitorF, _ := msg["monitor"].(float64)
 		monitorIdx := int(monitorF)
@@ -256,14 +254,7 @@ func (a *App) handleKioskCommand(msg map[string]any) {
 		}
 		a.currentMonitorIdx = monitorIdx
 		r := rects[monitorIdx]
-		go func() {
-			runtime.WindowExecJS(a.ctx, `window.__kioskBlackout&&window.__kioskBlackout(true)`)
-			time.Sleep(50 * time.Millisecond)
-			moveWindowFullscreenToMonitor(r)
-			time.Sleep(80 * time.Millisecond)
-			runtime.WindowExecJS(a.ctx, `window.__kioskBlackout&&window.__kioskBlackout(false)`)
-		}()
-
+		go a.moveWithBlackout(r)
 	case "next_monitor":
 		rects := getMonitorRects()
 		if len(rects) <= 1 {
@@ -272,13 +263,7 @@ func (a *App) handleKioskCommand(msg map[string]any) {
 		a.currentMonitorIdx = (a.currentMonitorIdx + 1) % len(rects)
 		r := rects[a.currentMonitorIdx]
 		log.Printf("[screen %d] Monitor gewechselt → %d (%d,%d)", a.screenIdx, a.currentMonitorIdx, r.X, r.Y)
-		go func() {
-			runtime.WindowExecJS(a.ctx, `window.__kioskBlackout&&window.__kioskBlackout(true)`)
-			time.Sleep(50 * time.Millisecond)
-			moveWindowFullscreenToMonitor(r)
-			time.Sleep(80 * time.Millisecond)
-			runtime.WindowExecJS(a.ctx, `window.__kioskBlackout&&window.__kioskBlackout(false)`)
-		}()
+		go a.moveWithBlackout(r)
 	}
 }
 
