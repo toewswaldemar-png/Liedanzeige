@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Hintergrund -->
+  <rect width="256" height="256" rx="48" fill="#1a1a2e"/>
+
+  <!-- Liedtafel-Rahmen -->
+  <rect x="28" y="40" width="200" height="176" rx="12" fill="#16213e"/>
+  <rect x="28" y="40" width="200" height="176" rx="12" fill="none" stroke="#4a4a8a" stroke-width="3"/>
+
+  <!-- Obere Leiste (Beschriftung "Lied") -->
+  <rect x="28" y="40" width="200" height="44" rx="12" fill="#0f3460"/>
+  <rect x="28" y="68" width="200" height="16" fill="#0f3460"/>
+  <text x="128" y="70" font-family="'Segoe UI', Arial, sans-serif" font-size="22" font-weight="700" fill="#a0a8d0" text-anchor="middle" letter-spacing="6">LIED</text>
+
+  <!-- Nummernzeile 1 -->
+  <rect x="44" y="100" width="168" height="46" rx="8" fill="#0a0a1a"/>
+  <text x="128" y="134" font-family="'Segoe UI', Arial, sans-serif" font-size="36" font-weight="700" fill="#e8e8ff" text-anchor="middle" letter-spacing="8">123</text>
+
+  <!-- Nummernzeile 2 -->
+  <rect x="44" y="156" width="168" height="46" rx="8" fill="#0a0a1a"/>
+  <text x="128" y="190" font-family="'Segoe UI', Arial, sans-serif" font-size="36" font-weight="700" fill="#5a5a9a" text-anchor="middle" letter-spacing="8">456</text>
+</svg>

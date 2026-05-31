@@ -1,0 +1,17 @@
+{
+  "FixedFileInfo": {
+    "FileVersion": { "Major": 1, "Minor": 0, "Patch": 0, "Build": 0 },
+    "ProductVersion": { "Major": 1, "Minor": 0, "Patch": 0, "Build": 0 }
+  },
+  "StringFileInfo": {
+    "CompanyName": "",
+    "FileDescription": "Liedanzeige Server",
+    "InternalName": "liedanzeige-server",
+    "LegalCopyright": "",
+    "OriginalFilename": "liedanzeige-server.exe",
+    "ProductName": "Liedanzeige"
+  },
+  "VarFileInfo": { "Translation": { "LangID": "0407", "CharsetID": "04B0" } },
+  "IconPath": "icon.ico",
+  "ManifestPath": ""
+}
