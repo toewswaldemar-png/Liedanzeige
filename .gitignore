@@ -1,0 +1,20 @@
+# Claude Code
+.claude/
+
+# Gebautes Frontend (npm run build)
+Development/server/static/
+Development/static/
+
+# Go Build-Ausgaben
+Development/server/build/
+Development/kiosk/build/
+Development/watchdog/build/
+*.exe
+
+# Laufzeit-Konfiguration (wird automatisch erstellt)
+**/config.json
+**/settings.json
+
+# OS
+.DS_Store
+Thumbs.db
