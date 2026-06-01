@@ -6,7 +6,6 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/"               element={<Navigate to="/steuerung/lied" replace />} />
         <Route path="/lied"           element={<Liedanzeige kanal="lied" />} />
         <Route path="/chor"           element={<Liedanzeige kanal="chor" />} />
         <Route path="/steuerung"      element={<Navigate to="/steuerung/lied" replace />} />

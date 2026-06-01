@@ -99,9 +99,11 @@ func (a *App) waitForServerThenLoad() {
 	healthURL := fmt.Sprintf("http://%s:%d/health", a.cfg.ServerHost, a.cfg.Port)
 	for {
 		resp, err := http.Get(healthURL)
-		if err == nil && resp.StatusCode == http.StatusOK {
+		if err == nil {
 			resp.Body.Close()
-			break
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
 		}
 		log.Println("Warte auf Server...")
 		time.Sleep(2 * time.Second)
@@ -226,7 +228,7 @@ func (a *App) moveWithBlackout(r monitorRect) {
 func (a *App) handleKioskCommand(msg map[string]any) {
 	cmd, _ := msg["command"].(string)
 	switch cmd {
-	case "fullscreen", "toggle_fullscreen":
+	case "fullscreen":
 		go a.goFullscreen()
 	case "windowed":
 		select {

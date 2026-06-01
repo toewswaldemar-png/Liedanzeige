@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 export interface LogEntry {
   ts: string
@@ -8,12 +8,13 @@ export interface LogEntry {
 
 const MAX_ENTRIES = 100
 
-export function useLogSocket() {
+export function useLogSocket(enabled = true) {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -64,9 +65,18 @@ export function useLogSocket() {
         wsRef.current = null
       }
     }
+  }, [enabled])
+
+  const send = useCallback((msg: object) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(msg))
+    }
   }, [])
 
-  const clear = () => setEntries([])
+  const clear = useCallback(() => {
+    setEntries([])
+    send({ action: 'clear_log' })
+  }, [send])
 
   return { entries, connected, clear }
 }

@@ -15,6 +15,7 @@ export type WsMessage =
   | { action: 'kiosk'; command: string }
   | { action: 'kiosk_state'; fullscreen: boolean }
   | { action: 'log'; level: 'info' | 'warn' | 'error'; message: string; ts: string }
+  | { action: 'sync'; liedState: string; chorState: string; steuerungState?: string; settings?: DisplaySettings }
 
 export const FONTS = [
   { key: 'segoe-ui',      label: 'Segoe UI',      value: '"Segoe UI", sans-serif'      },

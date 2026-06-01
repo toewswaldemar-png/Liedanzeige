@@ -32,6 +32,7 @@ type Hub struct {
 	clients         map[string]map[*Client]bool
 	liedState       string
 	chorState       string
+	steuerungState  string // einheitlicher Anzeigestand für alle Steuerung-Tabs
 	settings        DisplaySettings
 	cfg             *AppConfig
 	settingsPath    string
@@ -106,7 +107,19 @@ func (h *Hub) Register(channel string, client *Client) {
 	if channel == "steuerung" {
 		h.mu.RLock()
 		known, fullscreen := h.kioskStateKnown, h.kioskFullscreen
+		liedState, chorState, settings := h.liedState, h.chorState, h.settings
+		steuerungState := h.steuerungState
 		h.mu.RUnlock()
+		// Aktuellen Stand senden — neuer Tab zeigt sofort korrekten Zustand
+		if data, err := json.Marshal(Message{
+			"action":         "sync",
+			"liedState":      liedState,
+			"chorState":      chorState,
+			"steuerungState": steuerungState,
+			"settings":       settings,
+		}); err == nil {
+			_ = client.writeMessage(websocket.TextMessage, data)
+		}
 		if known {
 			if data, err := json.Marshal(Message{"action": "kiosk_state", "fullscreen": fullscreen}); err == nil {
 				_ = client.writeMessage(websocket.TextMessage, data)
@@ -155,6 +168,15 @@ func (h *Hub) broadcast(channel string, msg Message) {
 	}
 }
 
+func (h *Hub) HandleLogMessage(msg Message) {
+	action, _ := msg["action"].(string)
+	if action == "clear_log" {
+		h.logMu.Lock()
+		h.logHistory = h.logHistory[:0]
+		h.logMu.Unlock()
+	}
+}
+
 func (h *Hub) HandleKioskMessage(msg Message) {
 	action, _ := msg["action"].(string)
 	if action == "kiosk_state" {
@@ -198,6 +220,9 @@ func (h *Hub) HandleSteuerung(msg Message) {
 				h.chorState = h.liedState
 			}
 		}
+		if len(h.steuerungState) < 4 {
+			h.steuerungState += key
+		}
 		h.mu.Unlock()
 		for _, ch := range targets {
 			h.broadcast(ch, Message{"action": "input", "key": key})
@@ -207,22 +232,34 @@ func (h *Hub) HandleSteuerung(msg Message) {
 
 	case "backspace":
 		h.mu.Lock()
+		changed := false
 		if target == "chor" {
 			if len(h.chorState) > 0 {
 				h.chorState = h.chorState[:len(h.chorState)-1]
+				changed = true
 			}
 		} else {
 			if len(h.liedState) > 0 {
 				h.liedState = h.liedState[:len(h.liedState)-1]
 				h.chorState = h.liedState
+				changed = true
 			}
 		}
-		h.mu.Unlock()
-		for _, ch := range targets {
-			h.broadcast(ch, Message{"action": "backspace"})
+		steuerungChanged := false
+		if len(h.steuerungState) > 0 {
+			h.steuerungState = h.steuerungState[:len(h.steuerungState)-1]
+			steuerungChanged = true
 		}
-		h.broadcast("steuerung", Message{"action": "backspace", "target": target})
-		h.LogEvent("info", fmt.Sprintf("Loeschen -> %s", target))
+		h.mu.Unlock()
+		if changed || steuerungChanged {
+			if changed {
+				for _, ch := range targets {
+					h.broadcast(ch, Message{"action": "backspace"})
+				}
+			}
+			h.broadcast("steuerung", Message{"action": "backspace", "target": target})
+			h.LogEvent("info", fmt.Sprintf("Loeschen -> %s", target))
+		}
 
 	case "reset":
 		h.mu.Lock()
@@ -232,6 +269,7 @@ func (h *Hub) HandleSteuerung(msg Message) {
 			h.liedState = ""
 			h.chorState = ""
 		}
+		h.steuerungState = ""
 		h.mu.Unlock()
 		for _, ch := range targets {
 			h.broadcast(ch, Message{"action": "reset"})
@@ -254,20 +292,20 @@ func (h *Hub) HandleSteuerung(msg Message) {
 							h.LogEvent("error", fmt.Sprintf("settings speichern: %v", err))
 						}
 					}()
+					// Debounce: nur bei gültigen Settings und nach Ende der Slider-Bewegung loggen
+					h.settingsLogTimeMu.Lock()
+					if h.settingsLogTimer != nil {
+						h.settingsLogTimer.Stop()
+					}
+					h.settingsLogTimer = time.AfterFunc(500*time.Millisecond, func() {
+						h.LogEvent("info", "Einstellungen aktualisiert")
+					})
+					h.settingsLogTimeMu.Unlock()
 				}
 			}
 		}
 		h.broadcast("lied", msg)
 		h.broadcast("chor", msg)
-		// Debounce: nur nach Ende der Slider-Bewegung loggen
-		h.settingsLogTimeMu.Lock()
-		if h.settingsLogTimer != nil {
-			h.settingsLogTimer.Stop()
-		}
-		h.settingsLogTimer = time.AfterFunc(500*time.Millisecond, func() {
-			h.LogEvent("info", "Einstellungen aktualisiert")
-		})
-		h.settingsLogTimeMu.Unlock()
 
 	case "kiosk":
 		cmd, _ := msg["command"].(string)

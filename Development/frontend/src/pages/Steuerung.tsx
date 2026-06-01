@@ -61,6 +61,7 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
   const target = kanal
 
   const [display, setDisplay] = useState('')
+
   const [settings, setSettings] = useState<DisplaySettings>(loadSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [resetProgress, setResetProgress] = useState(100)
@@ -75,8 +76,6 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
   }, [kanal])
 
   const toggleKanal = () => {
-    send({ action: 'reset', target: 'lied' })
-    setDisplay('')
     navigate(target === 'lied' ? '/steuerung/chor' : '/steuerung/lied', { replace: true })
   }
 
@@ -104,15 +103,6 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
   // Fix: send in Dependency-Array
   }, [display, settings.resetDelay, target, send])
 
-  // Beim ersten Verbindungsaufbau beide Kanäle zurücksetzen
-  const didReset = useRef(false)
-  useEffect(() => {
-    if (connected && !didReset.current) {
-      didReset.current = true
-      send({ action: 'reset', target: 'lied' })
-      send({ action: 'reset', target: 'chor' })
-    }
-  }, [connected, send])
 
   const updateSetting = useCallback(<K extends keyof DisplaySettings>(key: K, value: DisplaySettings[K]): void => {
     setSettings(prev => {
@@ -132,21 +122,28 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
     send({ action: 'reset', target: 'lied' })
   }, [send])
 
-  // Display vom Server-Echo treiben — alle Steuerung-Tabs bleiben synchron
+  // Display vom Server-Echo treiben — alle Kanäle sichtbar
   useEffect(() => {
     if (!lastMessage) return
     const msg = lastMessage
+    if (msg.action === 'sync') {
+      setDisplay(msg.steuerungState ?? msg.liedState ?? '')
+      if (msg.settings) {
+        setSettings(msg.settings)
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(msg.settings))
+      }
+    }
     if (msg.action === 'input')      setDisplay(prev => prev.length >= 4 ? prev : prev + msg.key)
     if (msg.action === 'backspace')  setDisplay(prev => prev.slice(0, -1))
     if (msg.action === 'reset')      setDisplay('')
     if (msg.action === 'kiosk_state') setIsFullscreen(msg.fullscreen)
-  }, [lastMessage])
+  }, [lastMessage, kanal])
 
   const [isFullscreen, setIsFullscreen] = useState(true)
   const kioskCmd = (command: string) => send({ action: 'kiosk', command })
 
   const [logOpen, setLogOpen] = useState(false)
-  const { entries: logEntries, clear: clearLog } = useLogSocket()
+  const { entries: logEntries, clear: clearLog } = useLogSocket(kanal === 'lied')
 
   return (
     <div className="flex flex-col h-svh bg-background">

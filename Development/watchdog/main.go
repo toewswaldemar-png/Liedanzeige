@@ -40,7 +40,6 @@ func loadConfig(dir string) (*Config, error) {
 		return &cfg, nil
 	}
 
-	// Keine config.json gefunden — Standardwerte verwenden
 	cfg := Config{ServerHost: "localhost", Port: 1980}
 	log.Printf("Keine config.json gefunden — verwende Standard (%s:%d)", cfg.ServerHost, cfg.Port)
 	return &cfg, nil
@@ -49,10 +48,13 @@ func loadConfig(dir string) (*Config, error) {
 // ── Watchdog ──────────────────────────────────────────────────────────────────
 
 type Watchdog struct {
-	cfg    *Config
-	mu     sync.Mutex
-	proc   *exec.Cmd
-	exeDir string
+	cfg         *Config
+	mu          sync.Mutex // schuetzt proc, crashCount, lastCrashAt
+	startMu     sync.Mutex // verhindert gleichzeitige Neustarts
+	proc        *exec.Cmd
+	exeDir      string
+	crashCount  int
+	lastCrashAt time.Time
 }
 
 func (w *Watchdog) kioskPath() string {
@@ -60,7 +62,6 @@ func (w *Watchdog) kioskPath() string {
 }
 
 func (w *Watchdog) killAll() {
-	// Alle laufenden liedanzeige-kiosk.exe-Prozesse beenden (inkl. gespawnter --screen=N Kinder)
 	name := filepath.Base(w.kioskPath())
 	if err := exec.Command("taskkill", "/F", "/IM", name).Run(); err != nil {
 		log.Printf("taskkill: %v", err)
@@ -68,12 +69,12 @@ func (w *Watchdog) killAll() {
 }
 
 func (w *Watchdog) start() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	// Nur ein Start gleichzeitig erlaubt
+	w.startMu.Lock()
+	defer w.startMu.Unlock()
 
 	w.killAll()
-	time.Sleep(500 * time.Millisecond) // warten bis Prozesse beendet sind
-	w.proc = nil
+	time.Sleep(500 * time.Millisecond)
 
 	cmd := exec.Command(w.kioskPath())
 	cmd.Stdout = os.Stdout
@@ -83,31 +84,51 @@ func (w *Watchdog) start() {
 		log.Printf("kiosk start: %v", err)
 		return
 	}
-	w.proc = cmd
-	log.Printf("kiosk gestartet (PID %d)", cmd.Process.Pid)
 
+	w.mu.Lock()
+	w.proc = cmd
+	w.mu.Unlock()
+
+	log.Printf("kiosk gestartet (PID %d)", cmd.Process.Pid)
 	go w.monitor(cmd)
 }
 
 // monitor wartet auf Prozessende und startet automatisch neu
 func (w *Watchdog) monitor(cmd *exec.Cmd) {
+	startTime := time.Now()
 	err := cmd.Wait()
+	runDuration := time.Since(startTime)
 
 	w.mu.Lock()
 	isCurrent := w.proc == cmd
 	if isCurrent {
 		w.proc = nil
+		// Crash-Zaehler: nur bei kurzen Laufzeiten erhoehen
+		if runDuration < 30*time.Second {
+			if time.Since(w.lastCrashAt) < 60*time.Second {
+				w.crashCount++
+			} else {
+				w.crashCount = 1
+			}
+			w.lastCrashAt = time.Now()
+		} else {
+			w.crashCount = 0
+		}
 	}
+	crashCount := w.crashCount
 	w.mu.Unlock()
 
 	if isCurrent {
-		log.Printf("kiosk beendet (%v) — Neustart in 3s", err)
+		if crashCount >= 5 {
+			log.Printf("WARNUNG: Kiosk %d Mal in kurzer Zeit abgestuerzt — moeglicher Fehler in kiosk.exe", crashCount)
+		}
+		log.Printf("kiosk beendet (%v, Laufzeit: %v) — Neustart in 3s", err, runDuration.Round(time.Second))
 		time.Sleep(3 * time.Second)
 		w.start()
 	}
 }
 
-// connectWS hält WebSocket-Verbindung und verarbeitet Befehle
+// connectWS haelt WebSocket-Verbindung und verarbeitet Befehle
 func (w *Watchdog) connectWS() {
 	url := fmt.Sprintf("ws://%s:%d/ws/kiosk", w.cfg.ServerHost, w.cfg.Port)
 	for {

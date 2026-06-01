@@ -11,7 +11,7 @@ import (
 )
 
 func ensureFirewallRule(port int) {
-	ruleName := "Liedanzeige Server"
+	ruleName := "Liedanzeige-Server"
 
 	// Pruefen ob Regel bereits existiert
 	check := exec.Command("netsh", "advfirewall", "firewall", "show", "rule",

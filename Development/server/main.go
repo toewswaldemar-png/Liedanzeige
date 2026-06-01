@@ -25,7 +25,20 @@ const (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(_ *http.Request) bool { return true },
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // direkte Go-Verbindungen (Kiosk, Watchdog) haben keinen Origin-Header
+		}
+		// Localhost immer erlauben (Dev-Modus, Vite-Proxy)
+		if strings.HasPrefix(origin, "http://localhost") ||
+			strings.HasPrefix(origin, "http://127.0.0.1") {
+			return true
+		}
+		// Production: Origin muss mit dem Server-Host übereinstimmen
+		return strings.HasPrefix(origin, "http://"+r.Host) ||
+			strings.HasPrefix(origin, "https://"+r.Host)
+	},
 }
 
 func setupLogging() {
@@ -127,6 +140,11 @@ func main() {
 				if json.Unmarshal(data, &msg) == nil {
 					hub.HandleKioskMessage(msg)
 				}
+			} else if channel == "log" {
+				var msg Message
+				if json.Unmarshal(data, &msg) == nil {
+					hub.HandleLogMessage(msg)
+				}
 			}
 		}
 	})
@@ -151,6 +169,11 @@ func main() {
 	})
 
 	bindAddr := fmt.Sprintf(":%d", cfg.Port)
-	hub.LogEvent("info", fmt.Sprintf("Server gestartet: %s:%d", cfg.ServerHost, cfg.Port))
+	log.Printf("Server hoert auf %s:%d", cfg.ServerHost, cfg.Port)
+	go func() {
+		// Kurz warten bis ListenAndServe den Port gebunden hat, dann ins Log
+		// (LogEvent jetzt, da noch keine WS-Clients verbunden sein koennen)
+		hub.LogEvent("info", fmt.Sprintf("Server bereit: %s:%d", cfg.ServerHost, cfg.Port))
+	}()
 	log.Fatal(http.ListenAndServe(bindAddr, mux))
 }

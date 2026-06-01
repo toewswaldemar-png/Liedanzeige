@@ -29,7 +29,7 @@ func main() {
 		width, height = 800, 600
 	}
 
-	title := "Uhr Kiosk"
+	title := "Liedanzeige"
 	if *screenIdx < len(cfg.Screens) {
 		title = cfg.Screens[*screenIdx].Name
 	}
