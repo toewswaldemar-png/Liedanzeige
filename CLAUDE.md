@@ -11,9 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `Development/kiosk/` — Wails desktop app that wraps the frontend in native windows (one per screen)
 - `Development/watchdog/` — Go process monitor that auto-restarts `kiosk.exe` on crash
 
-`Deployment/` holds pre-built binaries and config for production use; source lives entirely in `Development/`.
-
-There are no tests in this codebase.
+Source lives entirely in `Development/`. There are no tests in this codebase.
 
 ## Commands
 
@@ -24,9 +22,9 @@ build.bat          :: alles
 build-server.bat   :: nur Frontend + Server
 build-kiosk.bat    :: nur Kiosk + Watchdog
 ```
-`npm install` wird automatisch nachgeholt wenn `frontend/node_modules/` fehlt.
+`npm install` wird automatisch nachgeholt wenn `frontend/node_modules/` fehlt. Alle Skripte pausieren bei Fehler.
 
-Baut Frontend → Server/Watchdog/Kiosk und legt die EXEs in `Development/_build/` ab:
+Ausgabe in `Development/_build/`:
 
 ```
 _build/
@@ -37,109 +35,106 @@ _build/
     └── liedanzeige-watchdog.exe
 ```
 
-`config.json` jeweils im entsprechenden Unterordner ablegen — Vorlage: `Development/config.example.json`. `settings.json` wird vom Server automatisch in `_build/server/` angelegt — nicht manuell erstellen oder löschen. Keine Laufzeit-Dateien in `_build/` selbst (nur `.gitkeep`).
+`config.json` jeweils im entsprechenden Unterordner ablegen — Vorlage: `Development/config.example.json`. `settings.json` wird vom Server automatisch in `_build/server/` angelegt — nicht manuell erstellen oder löschen.
 
 ### Entwicklung (einzelne Komponenten)
 
 ```bash
-cd Development/server
-go mod tidy       # first time only
-go run .
-```
-
-```bash
-cd Development/frontend
-npm install       # first time only
-npm run dev       # dev server on :5173, proxies /ws to :1980
-npm run lint      # ESLint
-```
-
-```bash
-cd Development/kiosk
-wails dev         # dev mode (800×600, windowed)
-```
-
-```bash
-cd Development/watchdog
-go run .
+cd Development/server && go run .
+cd Development/frontend && npm run dev   # :5173, proxies /ws → :1980
+cd Development/kiosk && wails dev
+cd Development/watchdog && go run .
 ```
 
 ## Architecture
 
-### WebSocket message flow
+### WebSocket channels & message flow
 
-The server (`Development/server/hub.go`) maintains a `Hub` with four named channels: `lied`, `chor`, `steuerung`, `kiosk`.
+The server (`Development/server/hub.go`) maintains a `Hub` with five named channels: `lied`, `chor`, `steuerung`, `kiosk`, `log`.
 
-- **steuerung** clients send commands: `input`, `backspace`, `reset`, `settings`, `kiosk`; the server echoes back so all operator tabs stay in sync — `Steuerung.tsx` never updates local state directly
-- Sending to target `"lied"` broadcasts to both `lied` and `chor` (they mirror each other); target `"chor"` controls only `chor` independently
-- When a display client connects, the hub immediately pushes current state (`display` action) + current settings
-- **kiosk** channel carries remote window-control commands (`fullscreen`, `windowed`, `toggle_fullscreen`, `reload`, `move_to`)
-- `swap_monitors` command toggles a `monitorsSwapped` flag in the hub and remaps all screen indices before broadcasting `move_to` commands
+- **steuerung** clients send: `input`, `backspace`, `reset`, `settings`, `kiosk`. Server echoes back so all operator tabs stay in sync — `Steuerung.tsx` never updates local state directly.
+- `target: "lied"` broadcasts to both `lied` and `chor`; `target: "chor"` controls only `chor` independently.
+- On connect, steuerung clients receive a `sync` message with `liedState`, `chorState`, `steuerungState` and current `settings`.
+- **`steuerungState`** is a third Hub state (separate from `liedState`/`chorState`) updated by ANY input regardless of channel — this is the authoritative display value for all Steuerung tabs. Both Lied- and Chor-Steuerung always show the same number.
+- On display client connect, hub pushes current state (`display` action) + current settings.
+- **kiosk** channel carries: `fullscreen`, `windowed`, `reload`, `move_to`; `swap_monitors` remaps screen indices.
+- **log** channel: server pushes `{ action: "log", level, message, ts }` entries; history (last 100) is replayed on connect. Clients send `{ action: "clear_log" }` to reset history.
 
 ### Frontend routes
 
 | URL | Page | Purpose |
 |-----|------|---------|
-| `/steuerung/lied` | `Steuerung.tsx` | Operator control for congregation screen |
-| `/steuerung/chor` | `Steuerung.tsx` | Operator control for choir screen |
-| `/lied` | `Liedanzeige.tsx` | Congregation display screen |
-| `/chor` | `Liedanzeige.tsx` | Choir display screen |
+| `/` | Landing page (server HTML) | Links to all available URLs |
+| `/steuerung/lied` | `Steuerung.tsx` | Operator control — congregation |
+| `/steuerung/chor` | `Steuerung.tsx` | Operator control — choir |
+| `/lied` | `Liedanzeige.tsx` | Congregation display |
+| `/chor` | `Liedanzeige.tsx` | Choir display |
 
-`/` and `/steuerung` redirect to `/steuerung/lied`. The channel is read from the URL path (not a query param).
+`/steuerung` redirects to `/steuerung/lied`. The landing page at `/` is served directly by the Go server (not the SPA).
 
-`Liedanzeige` has two modes: **clock mode** (no input) and **number mode** (hymn number entered). Display settings are applied as CSS custom properties on `<html>`. An auto-reset timer returns to clock mode after `resetDelay` minutes.
+`Liedanzeige` has two modes: **clock mode** (no input) and **number mode** (hymn number entered). Settings applied as CSS custom properties on `<html>`. Auto-reset timer returns to clock mode after `resetDelay` minutes.
+
+### Steuerung display logic
+
+- Display is a single shared state across all Steuerung tabs, initialised from `steuerungState` in the `sync` message.
+- All input echoes (lied AND chor) update the display on ALL Steuerung tabs — max 4 digits, `>= 4` guard on both send and receive.
+- Workflow: LÖSCHEN always clears both channels before entering a new number. LÖSCHEN on Chor-Steuerung sends `reset target: "lied"` which resets both `liedState` and `chorState`.
+- Terminal button (only on `/steuerung/lied`) opens a log panel showing server events in real-time.
 
 ### Key types (`Development/frontend/src/lib/types.ts`)
 
-`WsMessage` is the discriminated union of all WebSocket message shapes. `DisplaySettings` and `DEFAULTS` define the display configuration shared between `Steuerung` and `Liedanzeige`. **`DEFAULTS` in `types.ts` must stay in sync with the defaults in `Development/server/config.go`.**
+`WsMessage` is the discriminated union of all WebSocket message shapes. `DisplaySettings` and `DEFAULTS` define display configuration. **`DEFAULTS` in `types.ts` must stay in sync with the defaults in `Development/server/config.go`.**
 
 ### Settings persistence — three layers
 
-Display settings exist in three places that must stay consistent:
-
-1. **`localStorage`** (key `liedanzeige-settings`) — loaded by `frontend/src/lib/settings.ts` on mount, merged with `DEFAULTS`
-2. **Server in-memory `Hub`** — authoritative at runtime; pushed to display clients on connect
-3. **`server/settings.json`** — written asynchronously by the server on each `settings` WS message; read on server restart to restore state
-
-`server/config.json` holds server/kiosk/screen configuration and is separate from `settings.json`.
+1. **`localStorage`** (key `liedanzeige-settings`) — fallback initial value only
+2. **Server Hub** — authoritative at runtime; pushed via `sync` message to new Steuerung clients and via `settings` action to display clients
+3. **`server/settings.json`** — written async on each `settings` WS message; read on restart
 
 ### Kiosk (Wails)
 
-`Development/kiosk/app.go` — on `domReady` (guarded by `sync.Once`), polls `/health` until the server responds, then navigates the Wails window to its screen URL from `config.json`. Screen 0 spawns windows for screens 1+ as subprocesses (production, `--screen N` flag) or browser tabs (dev mode). Connects to `/ws/kiosk` for remote window-control commands.
+`Development/kiosk/app.go` — on `domReady` (guarded by `sync.Once`), polls `/health` until server responds, then navigates to screen URL. Screen 0 spawns screens 1+ as subprocesses (`--screen N` flag) in production or browser tabs in dev mode. Connects to `/ws/kiosk` for window-control commands.
 
-`Development/kiosk/monitor.go` (Windows-only) uses Win32 APIs (`EnumDisplayMonitors`, `SetWindowPos`) to move windows fullscreen to a specific monitor. Before moving, it calls `window.__kioskBlackout(true)` on the Wails webview to fade to black, then fades back in after repositioning.
+`Development/kiosk/monitor.go` (Windows-only) — Win32 APIs (`EnumDisplayMonitors`, `SetWindowPos`) to move windows fullscreen. Calls `window.__kioskBlackout(true/false)` on the WebView to fade during repositioning.
 
-`Development/kiosk/numpad.go` (Windows-only, choir screen only) installs a low-level keyboard hook (`WH_KEYBOARD_LL`) that captures numpad input globally — even when the window is unfocused — and forwards digits directly to `/ws/steuerung`. Handles both NumLock-on (VK_NUMPAD0–9) and NumLock-off (navigation keys mapped to digits) states.
+`Development/kiosk/numpad.go` (Windows-only, choir screen only) — low-level keyboard hook (`WH_KEYBOARD_LL`) captures numpad globally and forwards to `/ws/steuerung`. Handles NumLock-on and NumLock-off states.
 
 The kiosk has its own embedded frontend in `Development/kiosk/frontend/` (separate from `Development/frontend/`).
 
 ### Watchdog
 
-`Development/watchdog/main.go` monitors `kiosk.exe`, restarting it after a 3s delay on crash. Also subscribes to `/ws/kiosk` and restarts the kiosk on a `"reload"` command. Reads `config.json` from its own directory or parent.
+`Development/watchdog/main.go` — `startMu` prevents concurrent restarts; `mu` protects `proc` and crash counters. Logs a warning after 5 rapid crashes (<30s runtime). Subscribes to `/ws/kiosk` and restarts kiosk on `"reload"` command. Writes `watchdog.log` next to the exe.
+
+### Server extras
+
+- **Firewall** (`server/firewall_windows.go`): on first start, checks for rule `"Liedanzeige-Server"` via `netsh`; if missing, triggers UAC dialog to add it.
+- **File logging**: `setupLogging()` writes to `server.log` (next to exe) + stdout via `io.MultiWriter`.
+- **Landing page** (`server/landing.go`): `/` serves a static HTML page listing all URLs; does not load the SPA.
+- **WebSocket origin check**: allows empty Origin (Go clients), localhost, and same-host requests only.
 
 ### Path alias
 
-The frontend uses `@/` as an alias for `frontend/src/` (configured in `vite.config.ts` and `tsconfig.app.json`).
+Frontend uses `@/` → `frontend/src/` (configured in `vite.config.ts` and `tsconfig.app.json`).
 
 ## Configuration
 
-All Go components read **`config.json`** (JSON format) from their working directory or parent directory, creating it with defaults on first run. `Development/config.yaml` is a human-readable reference only — it is **not parsed by any component**.
+All Go components read **`config.json`** from their working directory or parent, creating it with defaults on first run.
 
-`server/settings.json` stores display settings separately and is managed exclusively by the server.
+`server/settings.json` stores display settings and is managed exclusively by the server.
 
 Key `config.json` fields:
 
 ```json
 {
-  "server_host": "localhost",
+  "server_host": "192.168.1.100",
   "port": 1980,
-  "dev": true,
+  "dev": false,
   "screens": [
-    { "name": "liedanzeige", "url": "/lied", "monitor": 0 },
-    { "name": "choranzeige", "url": "/chor", "monitor": 1 }
+    { "name": "liedanzeige", "url": "/lied", "monitor": 1 },
+    { "name": "choranzeige", "url": "/chor", "monitor": 0 }
   ],
   "kiosk": { "always_on_top": true }
 }
 ```
 
-`dev: false` makes kiosk run fullscreen and always-on-top. `server_host` must be the server's LAN IP for multi-machine setups.
+`dev: false` → kiosk runs fullscreen and always-on-top. `server_host` must be the LAN IP for multi-machine setups. `config.example.json` in `Development/` is the reference template.
