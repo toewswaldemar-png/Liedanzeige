@@ -15,33 +15,50 @@ There are no tests in this codebase.
 
 ## Commands
 
-### Server (Go)
+### Produktions-Build (alle Komponenten)
+```bat
+build.bat          :: alles
+build-server.bat   :: nur Frontend + Server
+build-kiosk.bat    :: nur Kiosk + Watchdog
+```
+`npm install` wird automatisch nachgeholt wenn `frontend/node_modules/` fehlt.
+
+Baut Frontend → Server/Watchdog/Kiosk und legt die EXEs in `_build/` ab:
+
+```
+_build/
+├── server/
+│   └── liedanzeige-server.exe
+└── kiosk/
+    ├── liedanzeige-kiosk.exe
+    └── liedanzeige-watchdog.exe
+```
+
+`config.json` jeweils im entsprechenden Unterordner ablegen — Vorlage: `config.example.json`. `settings.json` wird vom Server automatisch in `_build/server/` angelegt — nicht manuell erstellen oder löschen. Keine Laufzeit-Dateien in `_build/` selbst (nur `.gitkeep`).
+
+### Entwicklung (einzelne Komponenten)
+
 ```bash
 cd server
 go mod tidy       # first time only
 go run .
 ```
 
-### Frontend
 ```bash
 cd frontend
 npm install       # first time only
 npm run dev       # dev server on :5173, proxies /ws to :1980
-npm run build     # production build → ../server/static/
 npm run lint      # ESLint
 ```
 
-### Kiosk (Wails) — requires Go + Wails installed
 ```bash
 cd kiosk
 wails dev         # dev mode (800×600, windowed)
-wails build       # production build → kiosk/build/bin/
 ```
 
-### Watchdog
 ```bash
 cd watchdog
-go run .          # monitors kiosk.exe, restarts on crash
+go run .
 ```
 
 ## Architecture

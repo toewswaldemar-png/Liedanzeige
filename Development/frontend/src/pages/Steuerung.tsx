@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BookOpenText, Maximize2, Minimize2, Monitor, RotateCw, Settings2, Trash2, X } from 'lucide-react'
+import { BookOpenText, ExternalLink, Maximize2, Minimize2, Monitor, RotateCw, Settings2, Terminal, Trash2, X } from 'lucide-react'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import { useLogSocket } from '@/hooks/useLogSocket'
+import { LogPanel } from '@/components/LogPanel'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -143,6 +145,9 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
   const [isFullscreen, setIsFullscreen] = useState(true)
   const kioskCmd = (command: string) => send({ action: 'kiosk', command })
 
+  const [logOpen, setLogOpen] = useState(false)
+  const { entries: logEntries, clear: clearLog } = useLogSocket()
+
   return (
     <div className="flex flex-col h-svh bg-background">
 
@@ -165,12 +170,30 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
 
         <div className="flex items-center gap-2">
           {target === 'lied' && (
-            <button
-              onClick={e => { e.stopPropagation(); setSettingsOpen(true) }}
-              className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
-            >
-              <Settings2 className="w-4 h-4" />
-            </button>
+            <>
+              <button
+                onClick={e => { e.stopPropagation(); setLogOpen(v => !v) }}
+                className={cn(
+                  'inline-flex items-center justify-center h-8 w-8 rounded-lg border transition-colors',
+                  logOpen
+                    ? 'bg-zinc-900 text-white border-zinc-700 hover:bg-zinc-700 hover:text-white'
+                    : 'border-input bg-background hover:bg-accent hover:text-accent-foreground'
+                )}
+              >
+                <Terminal className="w-4 h-4" />
+              </button>
+              <button
+                onClick={e => { e.stopPropagation(); setSettingsOpen(v => !v) }}
+                className={cn(
+                  'inline-flex items-center justify-center h-8 w-8 rounded-lg border transition-colors',
+                  settingsOpen
+                    ? 'bg-zinc-900 text-white border-zinc-700 hover:bg-zinc-700 hover:text-white'
+                    : 'border-input bg-background hover:bg-accent hover:text-accent-foreground'
+                )}
+              >
+                <Settings2 className="w-4 h-4" />
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -249,6 +272,9 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
 
         </div>
       </div>
+
+      {/* ── Log-Panel ── */}
+      {target === 'lied' && logOpen && <LogPanel entries={logEntries} onClear={clearLog} />}
 
       {/* ── Einstellungs-Panel ── */}
       {settingsOpen && (
@@ -342,6 +368,25 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
                       className="flex flex-col items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2 py-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 active:bg-zinc-100 transition-colors"
                     >
                       {icon}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </SettingsSection>
+
+              {/* ── Im Browser oeffnen ── */}
+              <SettingsSection title="Im Browser">
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: 'Liedanzeige', href: '/lied'  },
+                    { label: 'Choranzeige', href: '/chor'  },
+                  ].map(({ label, href }) => (
+                    <button
+                      key={href}
+                      onClick={() => window.open(href, '_blank')}
+                      className="flex flex-col items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2 py-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 active:bg-zinc-100 transition-colors"
+                    >
+                      <ExternalLink className="w-4 h-4" />
                       {label}
                     </button>
                   ))}

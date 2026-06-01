@@ -1,0 +1,12 @@
+{
+  "server_host": "192.168.1.100",
+  "port": 1980,
+  "dev": false,
+  "screens": [
+    { "name": "liedanzeige", "url": "/lied", "monitor": 1 },
+    { "name": "choranzeige", "url": "/chor", "monitor": 0 }
+  ],
+  "kiosk": {
+    "always_on_top": true
+  }
+}

@@ -4,9 +4,12 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,7 +28,24 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(_ *http.Request) bool { return true },
 }
 
+func setupLogging() {
+	exePath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	logPath := filepath.Join(filepath.Dir(exePath), "server.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("log-datei konnte nicht geoeffnet werden: %v", err)
+		return
+	}
+	log.SetOutput(io.MultiWriter(os.Stdout, f))
+	log.SetFlags(log.Ltime | log.Lshortfile)
+}
+
 func main() {
+	setupLogging()
+
 	cfg, err := loadConfig("config.json")
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -35,6 +55,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("settings: %v", err)
 	}
+
+	ensureFirewallRule(cfg.Port)
 
 	hub := NewHub(cfg, settings, "settings.json")
 	mux := http.NewServeMux()
@@ -116,10 +138,11 @@ func main() {
 	}
 	fileServer := http.FileServer(http.FS(staticFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimPrefix(r.URL.Path, "/")
-		if path == "" {
-			path = "index.html"
+		if r.URL.Path == "/" {
+			serveLandingPage(w, r, cfg)
+			return
 		}
+		path := strings.TrimPrefix(r.URL.Path, "/")
 		if _, err := fs.Stat(staticFS, path); err != nil {
 			http.ServeFileFS(w, r, staticFS, "index.html")
 			return
@@ -128,6 +151,6 @@ func main() {
 	})
 
 	bindAddr := fmt.Sprintf(":%d", cfg.Port)
-	log.Printf("Uhr-Server läuft auf http://%s:%d", cfg.ServerHost, cfg.Port)
+	hub.LogEvent("info", fmt.Sprintf("Server gestartet: %s:%d", cfg.ServerHost, cfg.Port))
 	log.Fatal(http.ListenAndServe(bindAddr, mux))
 }

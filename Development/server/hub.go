@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -23,18 +25,24 @@ func (c *Client) writeMessage(messageType int, data []byte) error {
 	return c.conn.WriteMessage(messageType, data)
 }
 
+const maxLogHistory = 100
+
 type Hub struct {
-	mu                sync.RWMutex
-	clients           map[string]map[*Client]bool
-	liedState         string
-	chorState         string
-	settings          DisplaySettings
-	cfg               *AppConfig
-	settingsPath      string
+	mu              sync.RWMutex
+	clients         map[string]map[*Client]bool
+	liedState       string
+	chorState       string
+	settings        DisplaySettings
+	cfg             *AppConfig
+	settingsPath    string
 	settingsMu        sync.Mutex // serialisiert Schreibzugriffe auf settings.json
+	settingsLogTimer  *time.Timer
+	settingsLogTimeMu sync.Mutex
 	monitorsSwapped   bool
-	kioskFullscreen   bool
-	kioskStateKnown   bool
+	kioskFullscreen bool
+	kioskStateKnown bool
+	logHistory      []Message
+	logMu           sync.Mutex
 }
 
 func NewHub(cfg *AppConfig, settings *DisplaySettings, settingsPath string) *Hub {
@@ -44,11 +52,31 @@ func NewHub(cfg *AppConfig, settings *DisplaySettings, settingsPath string) *Hub
 			"chor":      {},
 			"steuerung": {},
 			"kiosk":     {},
+			"log":       {},
 		},
 		settings:     *settings,
 		cfg:          cfg,
 		settingsPath: settingsPath,
 	}
+}
+
+// LogEvent schreibt einen Eintrag ins File-Log, puffert ihn und sendet ihn an alle /ws/log Clients.
+func (h *Hub) LogEvent(level, msg string) {
+	ts := time.Now().Format("15:04:05")
+	log.Printf("[%s] %s", level, msg)
+	entry := Message{
+		"action":  "log",
+		"level":   level,
+		"message": msg,
+		"ts":      ts,
+	}
+	h.logMu.Lock()
+	h.logHistory = append(h.logHistory, entry)
+	if len(h.logHistory) > maxLogHistory {
+		h.logHistory = h.logHistory[len(h.logHistory)-maxLogHistory:]
+	}
+	h.logMu.Unlock()
+	h.broadcast("log", entry)
 }
 
 func (h *Hub) Register(channel string, client *Client) {
@@ -58,6 +86,22 @@ func (h *Hub) Register(channel string, client *Client) {
 	}
 	h.clients[channel][client] = true
 	h.mu.Unlock()
+
+	// Log-Kanal: History sofort senden, kein Connect-Event loggen
+	if channel == "log" {
+		h.logMu.Lock()
+		history := make([]Message, len(h.logHistory))
+		copy(history, h.logHistory)
+		h.logMu.Unlock()
+		for _, entry := range history {
+			if data, err := json.Marshal(entry); err == nil {
+				_ = client.writeMessage(websocket.TextMessage, data)
+			}
+		}
+		return
+	}
+
+	h.LogEvent("info", fmt.Sprintf("verbunden: %s", channel))
 
 	if channel == "steuerung" {
 		h.mu.RLock()
@@ -92,6 +136,9 @@ func (h *Hub) Unregister(channel string, client *Client) {
 	h.mu.Lock()
 	delete(h.clients[channel], client)
 	h.mu.Unlock()
+	if channel != "log" {
+		h.LogEvent("info", fmt.Sprintf("getrennt: %s", channel))
+	}
 }
 
 func (h *Hub) broadcast(channel string, msg Message) {
@@ -116,6 +163,11 @@ func (h *Hub) HandleKioskMessage(msg Message) {
 		h.kioskFullscreen = fullscreen
 		h.kioskStateKnown = true
 		h.mu.Unlock()
+		state := "Fenster"
+		if fullscreen {
+			state = "Vollbild"
+		}
+		h.LogEvent("info", fmt.Sprintf("Kiosk: %s", state))
 		h.broadcast("steuerung", msg)
 	}
 }
@@ -151,6 +203,7 @@ func (h *Hub) HandleSteuerung(msg Message) {
 			h.broadcast(ch, Message{"action": "input", "key": key})
 		}
 		h.broadcast("steuerung", Message{"action": "input", "key": key, "target": target})
+		h.LogEvent("info", fmt.Sprintf("Eingabe: '%s' -> %s", key, target))
 
 	case "backspace":
 		h.mu.Lock()
@@ -169,6 +222,7 @@ func (h *Hub) HandleSteuerung(msg Message) {
 			h.broadcast(ch, Message{"action": "backspace"})
 		}
 		h.broadcast("steuerung", Message{"action": "backspace", "target": target})
+		h.LogEvent("info", fmt.Sprintf("Loeschen -> %s", target))
 
 	case "reset":
 		h.mu.Lock()
@@ -183,6 +237,7 @@ func (h *Hub) HandleSteuerung(msg Message) {
 			h.broadcast(ch, Message{"action": "reset"})
 		}
 		h.broadcast("steuerung", Message{"action": "reset", "target": target})
+		h.LogEvent("info", fmt.Sprintf("Reset -> %s", target))
 
 	case "settings":
 		if raw, ok := msg["settings"]; ok {
@@ -196,7 +251,7 @@ func (h *Hub) HandleSteuerung(msg Message) {
 						h.settingsMu.Lock()
 						defer h.settingsMu.Unlock()
 						if err := saveSettings(h.settingsPath, s); err != nil {
-							log.Printf("settings speichern: %v", err)
+							h.LogEvent("error", fmt.Sprintf("settings speichern: %v", err))
 						}
 					}()
 				}
@@ -204,6 +259,15 @@ func (h *Hub) HandleSteuerung(msg Message) {
 		}
 		h.broadcast("lied", msg)
 		h.broadcast("chor", msg)
+		// Debounce: nur nach Ende der Slider-Bewegung loggen
+		h.settingsLogTimeMu.Lock()
+		if h.settingsLogTimer != nil {
+			h.settingsLogTimer.Stop()
+		}
+		h.settingsLogTimer = time.AfterFunc(500*time.Millisecond, func() {
+			h.LogEvent("info", "Einstellungen aktualisiert")
+		})
+		h.settingsLogTimeMu.Unlock()
 
 	case "kiosk":
 		cmd, _ := msg["command"].(string)
@@ -225,8 +289,10 @@ func (h *Hub) HandleSteuerung(msg Message) {
 					"monitor": targetMonitor,
 				})
 			}
+			h.LogEvent("info", "Monitore getauscht")
 		} else {
 			h.broadcast("kiosk", msg)
+			h.LogEvent("info", fmt.Sprintf("Kiosk-Befehl: %s", cmd))
 		}
 	}
 }

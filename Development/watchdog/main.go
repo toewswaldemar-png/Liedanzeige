@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -146,6 +147,10 @@ func main() {
 		log.Fatal(err)
 	}
 	exeDir := filepath.Dir(exePath)
+
+	if f, err := os.OpenFile(filepath.Join(exeDir, "watchdog.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+		log.SetOutput(io.MultiWriter(os.Stdout, f))
+	}
 
 	cfg, err := loadConfig(exeDir)
 	if err != nil {
