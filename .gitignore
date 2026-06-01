@@ -1,15 +1,21 @@
 # Claude Code
 .claude/
 
+# Abhängigkeiten
+Development/frontend/node_modules/
+
 # Gebautes Frontend (npm run build)
 Development/server/static/
 Development/static/
 
+# Kiosk Wails-Build-Output
+Development/kiosk/frontend/package.json.md5
+
 # Go Build-Ausgaben
 Development/server/build/
-Development/kiosk/build/
-Development/watchdog/build/
+Development/kiosk/build/bin/
 *.exe
+*.syso
 
 # Laufzeit-Konfiguration (wird automatisch erstellt)
 **/config.json
@@ -17,6 +23,10 @@ Development/watchdog/build/
 
 # Build-Ausgabe
 _build/
+
+# Logs
+*.log
+*.local
 
 # OS
 .DS_Store

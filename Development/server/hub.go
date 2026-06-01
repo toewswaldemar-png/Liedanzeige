@@ -223,11 +223,12 @@ func (h *Hub) HandleSteuerung(msg Message) {
 		if len(h.steuerungState) < 4 {
 			h.steuerungState += key
 		}
+		steuerungState := h.steuerungState
 		h.mu.Unlock()
 		for _, ch := range targets {
 			h.broadcast(ch, Message{"action": "input", "key": key})
 		}
-		h.broadcast("steuerung", Message{"action": "input", "key": key, "target": target})
+		h.broadcast("steuerung", Message{"action": "input", "key": key, "target": target, "steuerungState": steuerungState})
 		h.LogEvent("info", fmt.Sprintf("Eingabe: '%s' -> %s", key, target))
 
 	case "backspace":

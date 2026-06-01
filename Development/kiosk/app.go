@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"os/exec"
 	"sync"
 	"time"
 
@@ -119,29 +117,10 @@ func (a *App) waitForServerThenLoad() {
 		a.goFullscreen()
 	}
 
-	if a.screenIdx == 0 {
-		if a.cfg.Dev {
-			// Im Dev-Modus: weitere Screens als Browser-Tab öffnen
-			for i := 1; i < len(a.cfg.Screens); i++ {
-				runtime.BrowserOpenURL(a.ctx, a.screenTargetURL(i))
-			}
-		} else {
-			// Im Production-Modus: weitere Fenster als eigene Prozesse spawnen
-			exe, err := os.Executable()
-			if err != nil {
-				log.Printf("os.Executable: %v", err)
-			} else {
-				for i := 1; i < len(a.cfg.Screens); i++ {
-					cmd := exec.Command(exe, fmt.Sprintf("--screen=%d", i))
-					cmd.Stdout = os.Stdout
-					cmd.Stderr = os.Stderr
-					if err := cmd.Start(); err != nil {
-						log.Printf("Fenster %d starten: %v", i, err)
-					} else {
-						log.Printf("Fenster %d gestartet (PID %d)", i, cmd.Process.Pid)
-					}
-				}
-			}
+	if a.screenIdx == 0 && a.cfg.Dev {
+		// Im Dev-Modus: weitere Screens als Browser-Tab öffnen
+		for i := 1; i < len(a.cfg.Screens); i++ {
+			runtime.BrowserOpenURL(a.ctx, a.screenTargetURL(i))
 		}
 	}
 

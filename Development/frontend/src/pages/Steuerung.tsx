@@ -133,11 +133,11 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(msg.settings))
       }
     }
-    if (msg.action === 'input')      setDisplay(prev => prev.length >= 4 ? prev : prev + msg.key)
+    if (msg.action === 'input')      setDisplay(msg.steuerungState ?? (prev => prev.length >= 4 ? prev : prev + msg.key))
     if (msg.action === 'backspace')  setDisplay(prev => prev.slice(0, -1))
     if (msg.action === 'reset')      setDisplay('')
     if (msg.action === 'kiosk_state') setIsFullscreen(msg.fullscreen)
-  }, [lastMessage, kanal])
+  }, [lastMessage])
 
   const [isFullscreen, setIsFullscreen] = useState(true)
   const kioskCmd = (command: string) => send({ action: 'kiosk', command })

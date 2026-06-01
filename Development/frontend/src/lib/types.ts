@@ -7,7 +7,7 @@ export interface DisplaySettings {
 }
 
 export type WsMessage =
-  | { action: 'input'; key: string; target?: string }
+  | { action: 'input'; key: string; target?: string; steuerungState?: string }
   | { action: 'backspace'; target?: string }
   | { action: 'reset'; target?: string }
   | { action: 'settings'; settings: DisplaySettings }

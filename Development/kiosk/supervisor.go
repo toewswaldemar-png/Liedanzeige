@@ -1,0 +1,159 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+type supervisor struct {
+	cfg     *Config
+	exePath string
+	screens []*managedScreen
+}
+
+type managedScreen struct {
+	idx         int
+	mu          sync.Mutex
+	proc        *exec.Cmd
+	crashCount  int
+	lastCrashAt time.Time
+}
+
+func runSupervisor() {
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Fatal(err)
+	}
+	exeDir := filepath.Dir(exePath)
+
+	if f, err := os.OpenFile(filepath.Join(exeDir, "kiosk.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+		log.SetOutput(io.MultiWriter(os.Stdout, f))
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+
+	count := len(cfg.Screens)
+	if count == 0 {
+		count = 1
+	}
+
+	sup := &supervisor{
+		cfg:     cfg,
+		exePath: exePath,
+		screens: make([]*managedScreen, count),
+	}
+	for i := range sup.screens {
+		sup.screens[i] = &managedScreen{idx: i}
+	}
+
+	log.Printf("Supervisor — %d Screen(s), Server: %s:%d", count, cfg.ServerHost, cfg.Port)
+
+	for _, s := range sup.screens {
+		go s.run(exePath)
+	}
+
+	sup.connectWS()
+}
+
+// run startet den Screen-Prozess und überwacht ihn in einer Endlosschleife.
+func (s *managedScreen) run(exePath string) {
+	for {
+		cmd := exec.Command(exePath, fmt.Sprintf("--screen=%d", s.idx))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Start(); err != nil {
+			log.Printf("[screen %d] start: %v — retry in 3s", s.idx, err)
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		s.mu.Lock()
+		s.proc = cmd
+		s.mu.Unlock()
+		log.Printf("[screen %d] gestartet (PID %d)", s.idx, cmd.Process.Pid)
+
+		startTime := time.Now()
+		err := cmd.Wait()
+		runDuration := time.Since(startTime)
+
+		s.mu.Lock()
+		s.proc = nil
+		if runDuration < 30*time.Second {
+			if time.Since(s.lastCrashAt) < 60*time.Second {
+				s.crashCount++
+			} else {
+				s.crashCount = 1
+			}
+			s.lastCrashAt = time.Now()
+		} else {
+			s.crashCount = 0
+		}
+		crashCount := s.crashCount
+		s.mu.Unlock()
+
+		if crashCount >= 5 {
+			log.Printf("[screen %d] WARNUNG: %d Mal in kurzer Zeit abgestürzt", s.idx, crashCount)
+		}
+		log.Printf("[screen %d] beendet (%v, Laufzeit %v) — Neustart in 3s", s.idx, err, runDuration.Round(time.Second))
+		time.Sleep(3 * time.Second)
+	}
+}
+
+// restart beendet den laufenden Prozess; run() startet ihn automatisch neu.
+func (s *managedScreen) restart() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.proc != nil && s.proc.Process != nil {
+		_ = s.proc.Process.Kill()
+	}
+}
+
+func (sup *supervisor) restartAll() {
+	log.Println("reload — starte alle Screens neu")
+	for _, s := range sup.screens {
+		s.restart()
+	}
+}
+
+func (sup *supervisor) connectWS() {
+	url := fmt.Sprintf("ws://%s:%d/ws/kiosk", sup.cfg.ServerHost, sup.cfg.Port)
+	for {
+		conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+		if err != nil {
+			log.Printf("supervisor ws: %v — retry in 2s", err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		log.Println("supervisor ws: verbunden")
+
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				log.Printf("supervisor ws: %v", err)
+				break
+			}
+			var msg map[string]any
+			if json.Unmarshal(data, &msg) != nil {
+				continue
+			}
+			if msg["action"] == "kiosk" && msg["command"] == "reload" {
+				go sup.restartAll()
+			}
+		}
+		conn.Close()
+		time.Sleep(2 * time.Second)
+	}
+}

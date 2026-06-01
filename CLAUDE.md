@@ -8,8 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `Development/server/` — Go HTTP + WebSocket server (port 1980); embeds `server/static/` at build time
 - `Development/frontend/` — React 19 + TypeScript + Tailwind + shadcn/ui SPA (Vite); builds to `server/static/`
-- `Development/kiosk/` — Wails desktop app that wraps the frontend in native windows (one per screen)
-- `Development/watchdog/` — Go process monitor that auto-restarts `kiosk.exe` on crash
+- `Development/kiosk/` — Wails desktop app; ohne `--screen`-Flag läuft es als Supervisor (startet und überwacht alle Screens), mit `--screen=N` als Kiosk-Fenster
 
 Source lives entirely in `Development/`. There are no tests in this codebase.
 
@@ -17,25 +16,27 @@ Source lives entirely in `Development/`. There are no tests in this codebase.
 
 ### Produktions-Build (alle Komponenten)
 ```bat
-cd Development
 build.bat          :: alles
 build-server.bat   :: nur Frontend + Server
-build-kiosk.bat    :: nur Kiosk + Watchdog
+build-kiosk.bat    :: nur Kiosk
 ```
 `npm install` wird automatisch nachgeholt wenn `frontend/node_modules/` fehlt. Alle Skripte pausieren bei Fehler.
 
-Ausgabe in `Development/_build/`:
+> **Kiosk-Build:** `build-kiosk.bat` ruft `wails build -skipbindings` auf. Der Wails-Binding-Generator hängt sich auf diesem System auf; `-skipbindings` überspringt ihn sicher, da sich die gebundenen Go-Typen selten ändern. Wails legt die EXE zunächst in `Development/kiosk/build/bin/` ab — das Skript kopiert sie nach `_build/Kiosk/liedanzeige-kiosk.exe` und löscht `build/bin/` danach automatisch. Das Verzeichnis `Development/kiosk/build/` (Icons, Manifests) bleibt erhalten.
+
+> **Wichtig:** Der Go-Server bettet die Frontend-Dateien per `//go:embed static` zur Compile-Zeit ein. Nach jeder Frontend-Änderung muss deshalb **auch der Go-Server neu gebaut werden** — `npm run build` allein reicht nicht. Schnellster Weg: `build-server.bat` (baut Frontend + Server in einem Schritt).
+
+Ausgabe in `_build/` (Repo-Root):
 
 ```
 _build/
-├── server/
+├── Server/
 │   └── liedanzeige-server.exe
-└── kiosk/
-    ├── liedanzeige-kiosk.exe
-    └── liedanzeige-watchdog.exe
+└── Kiosk/
+    └── liedanzeige-kiosk.exe   (Supervisor + Kiosk in einer Binary)
 ```
 
-`config.json` jeweils im entsprechenden Unterordner ablegen — Vorlage: `Development/config.example.json`. `settings.json` wird vom Server automatisch in `_build/server/` angelegt — nicht manuell erstellen oder löschen.
+`config.json` jeweils im entsprechenden Unterordner ablegen — Vorlage: `config.example.json` im Repo-Root. `settings.json` wird vom Server automatisch in `_build/Server/` angelegt — nicht manuell erstellen oder löschen.
 
 ### Entwicklung (einzelne Komponenten)
 
@@ -99,7 +100,7 @@ The server (`Development/server/hub.go`) maintains a `Hub` with five named chann
 
 `Development/kiosk/numpad.go` (Windows-only, choir screen only) — low-level keyboard hook (`WH_KEYBOARD_LL`) captures numpad globally and forwards to `/ws/steuerung`. Handles NumLock-on and NumLock-off states.
 
-The kiosk has its own embedded frontend in `Development/kiosk/frontend/` (separate from `Development/frontend/`).
+The kiosk has a minimal embedded frontend in `Development/kiosk/frontend/dist/index.html` — eine einzelne statische HTML-Datei (kein npm, kein Build-Schritt). Wails bettet sie zur Compile-Zeit ein; die eigentliche Anzeige kommt vom Haupt-Frontend nach Navigation.
 
 ### Watchdog
 

@@ -3,19 +3,28 @@ package main
 import (
 	"embed"
 	"flag"
+	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
-	screenIdx := flag.Int("screen", 0, "Index in config.screens (wird von Screen 0 automatisch gesetzt)")
+	screenIdx := flag.Int("screen", -1, "Screen-Index in config.screens; ohne Flag → Supervisor-Modus")
 	flag.Parse()
+
+	if *screenIdx < 0 {
+		runSupervisor()
+		return
+	}
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -34,6 +43,10 @@ func main() {
 		title = cfg.Screens[*screenIdx].Name
 	}
 
+	// Jeder Screen braucht ein eigenes WebView2-Datenverzeichnis,
+	// sonst blockiert die zweite Instanz (WebView2 erlaubt pro Ordner nur einen Prozess).
+	webviewDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("liedanzeige-screen-%d", *screenIdx))
+
 	err = wails.Run(&options.App{
 		Title:            title,
 		Width:            width,
@@ -48,6 +61,9 @@ func main() {
 		OnDomReady:               app.domReady,
 		Bind:                     []interface{}{app},
 		EnableDefaultContextMenu: false,
+		Windows: &windows.Options{
+			WebviewUserDataPath: webviewDataPath,
+		},
 	})
 
 	if err != nil {

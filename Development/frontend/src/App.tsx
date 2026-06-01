@@ -9,8 +9,8 @@ export default function App() {
         <Route path="/lied"           element={<Liedanzeige kanal="lied" />} />
         <Route path="/chor"           element={<Liedanzeige kanal="chor" />} />
         <Route path="/steuerung"      element={<Navigate to="/steuerung/lied" replace />} />
-        <Route path="/steuerung/lied" element={<Steuerung kanal="lied" />} />
-        <Route path="/steuerung/chor" element={<Steuerung kanal="chor" />} />
+        <Route path="/steuerung/lied" element={<Steuerung key="lied" kanal="lied" />} />
+        <Route path="/steuerung/chor" element={<Steuerung key="chor" kanal="chor" />} />
       </Routes>
     </BrowserRouter>
   )
