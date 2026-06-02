@@ -44,7 +44,6 @@ _build/
 cd Development/server && go run .
 cd Development/frontend && npm run dev   # :5173, proxies /ws → :1980
 cd Development/kiosk && wails dev
-cd Development/watchdog && go run .
 ```
 
 ## Architecture
@@ -58,7 +57,7 @@ The server (`Development/server/hub.go`) maintains a `Hub` with five named chann
 - On connect, steuerung clients receive a `sync` message with `liedState`, `chorState`, `steuerungState` and current `settings`.
 - **`steuerungState`** is a third Hub state (separate from `liedState`/`chorState`) updated by ANY input regardless of channel — this is the authoritative display value for all Steuerung tabs. Both Lied- and Chor-Steuerung always show the same number.
 - On display client connect, hub pushes current state (`display` action) + current settings.
-- **kiosk** channel carries: `fullscreen`, `windowed`, `reload`, `move_to`; `swap_monitors` remaps screen indices.
+- **kiosk** channel carries: `fullscreen`, `windowed`, `reload`, `move_to`, `quit`; `swap_monitors` remaps screen indices.
 - **log** channel: server pushes `{ action: "log", level, message, ts }` entries; history (last 100) is replayed on connect. Clients send `{ action: "clear_log" }` to reset history.
 
 ### Frontend routes
@@ -94,17 +93,27 @@ The server (`Development/server/hub.go`) maintains a `Hub` with five named chann
 
 ### Kiosk (Wails)
 
-`Development/kiosk/app.go` — on `domReady` (guarded by `sync.Once`), polls `/health` until server responds, then navigates to screen URL. Screen 0 spawns screens 1+ as subprocesses (`--screen N` flag) in production or browser tabs in dev mode. Connects to `/ws/kiosk` for window-control commands.
+`Development/kiosk/main.go` — startet entweder im Supervisor-Modus (kein `--screen`-Flag) oder als Screen-Prozess (`--screen=N`). Produktion: `StartHidden: true` damit das Fenster erst nach der Positionierung sichtbar wird (kein Größensprung). `OnBeforeClose` fängt den X-Button ab.
 
-`Development/kiosk/monitor.go` (Windows-only) — Win32 APIs (`EnumDisplayMonitors`, `SetWindowPos`) to move windows fullscreen. Calls `window.__kioskBlackout(true/false)` on the WebView to fade during repositioning.
+`Development/kiosk/app.go` — Lebenszyklus eines Screen-Prozesses:
+1. `startup`: Fenster auf 1/4 Bildschirmgröße setzen, dann `WindowShow` (kein sichtbarer Sprung vom Wails-Default).
+2. `domReady` → `waitForServerThenLoad`: zeigt Lade-Overlay, pollt `/health`, navigiert zur Screen-URL, stellt gespeicherten Fenster-Zustand (Vollbild/Fenster) wieder her.
+3. `startQuitShortcut` + `connectKioskWS` starten nach Navigation.
+4. `OnBeforeClose` (X-Button): `os.Exit(100)` — Supervisor erkennt Exit-Code 100 und beendet alle Screens.
+
+`Development/kiosk/supervisor.go` — ohne `--screen`-Flag: startet alle Screen-Prozesse und überwacht sie. Registriert eigenen `WH_KEYBOARD_LL`-Hook für Strg+Alt+Q (unabhängig vom Server). Erkennt Exit-Code 100 eines Screen-Prozesses als bewusstes Beenden und beendet alle anderen Screens + sich selbst. Reagiert außerdem auf `quit`-Befehl via `/ws/kiosk`. `stopped`-Flag je Screen verhindert ungewollten Neustart.
+
+`Development/kiosk/monitor.go` (Windows-only) — Win32 APIs (`EnumDisplayMonitors`, `SetWindowPos`) für Monitor-Erkennung und Vollbild. Calls `window.__kioskBlackout(true/false)` on the WebView to fade during repositioning.
+
+`Development/kiosk/quit_shortcut_windows.go` (Windows-only) — globaler `WH_KEYBOARD_LL`-Hook für Strg+Alt+Q. Wird sowohl vom Supervisor als auch von jedem Screen-Prozess registriert.
 
 `Development/kiosk/numpad.go` (Windows-only, choir screen only) — low-level keyboard hook (`WH_KEYBOARD_LL`) captures numpad globally and forwards to `/ws/steuerung`. Handles NumLock-on and NumLock-off states.
 
 The kiosk has a minimal embedded frontend in `Development/kiosk/frontend/dist/index.html` — eine einzelne statische HTML-Datei (kein npm, kein Build-Schritt). Wails bettet sie zur Compile-Zeit ein; die eigentliche Anzeige kommt vom Haupt-Frontend nach Navigation.
 
-### Watchdog
+#### Fenster-Zustand
 
-`Development/watchdog/main.go` — `startMu` prevents concurrent restarts; `mu` protects `proc` and crash counters. Logs a warning after 5 rapid crashes (<30s runtime). Subscribes to `/ws/kiosk` and restarts kiosk on `"reload"` command. Writes `watchdog.log` next to the exe.
+Der Fensterstatus (Vollbild/Fenster) wird in `%TEMP%\liedanzeige-screen-N-state.json` gespeichert und nach Neustart wiederhergestellt. Beim Laden zeigt der Kiosk immer 1/4 Bildschirmgröße — nach Navigation wird der gespeicherte Zustand angewendet.
 
 ### Server extras
 
@@ -138,4 +147,4 @@ Key `config.json` fields:
 }
 ```
 
-`dev: false` → kiosk runs fullscreen and always-on-top. `server_host` must be the LAN IP for multi-machine setups. `config.example.json` in `Development/` is the reference template.
+`dev: false` → kiosk runs fullscreen and always-on-top. `server_host` must be the LAN IP for multi-machine setups. Falls keine `config.json` vorhanden, legt der Kiosk automatisch eine mit Defaults an (`server_host: localhost`, Port 1980). `config.example.json` im Repo-Root ist die Referenzvorlage.
