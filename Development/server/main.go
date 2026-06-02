@@ -42,6 +42,15 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// timestampWriter hängt "2006-01-02 15:04:05 " vor jede Log-Zeile.
+type timestampWriter struct{ w io.Writer }
+
+func (t timestampWriter) Write(p []byte) (int, error) {
+	prefix := []byte(time.Now().Format("2006-01-02 15:04:05 "))
+	_, _ = t.w.Write(prefix)
+	return t.w.Write(p)
+}
+
 func setupLogging() {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -53,8 +62,9 @@ func setupLogging() {
 		log.Printf("log-datei konnte nicht geoeffnet werden: %v", err)
 		return
 	}
-	log.SetOutput(io.MultiWriter(os.Stdout, f))
-	log.SetFlags(log.Ltime | log.Lshortfile)
+	w := timestampWriter{w: io.MultiWriter(os.Stdout, f)}
+	log.SetOutput(w)
+	log.SetFlags(log.Lshortfile) // Datum/Zeit kommt vom timestampWriter
 }
 
 func main() {

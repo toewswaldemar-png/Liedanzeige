@@ -62,6 +62,14 @@ func NewApp(cfg *Config, screenIdx int) *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if !a.cfg.Dev {
+		if r, ok := a.monitorRect(); ok {
+			cascade := a.screenIdx * 40
+			runtime.WindowSetSize(ctx, r.W/2, r.H/2)
+			runtime.WindowSetPosition(ctx, r.X+cascade, r.Y+cascade)
+		}
+		runtime.WindowShow(ctx)
+	}
 }
 
 func (a *App) monitorRect() (monitorRect, bool) {
@@ -135,8 +143,6 @@ func (a *App) waitForServerThenLoad() {
 	if !a.cfg.Dev {
 		time.Sleep(300 * time.Millisecond)
 		if loadWindowState(a.screenIdx) {
-			// Letzter bekannter Zustand war Fenstermodus → wiederherstellen
-			a.isFullscreen = false
 			if r, ok := a.monitorRect(); ok {
 				cascade := a.screenIdx * 40
 				setWindowPos(monitorRect{X: r.X + cascade, Y: r.Y + cascade, W: r.W / 2, H: r.H / 2}, false)
@@ -157,12 +163,9 @@ func (a *App) waitForServerThenLoad() {
 	}
 
 	startQuitShortcut(func() {
-		// Quit via Server: Broadcast geht an Supervisor (stopped=true → kein Neustart)
-		// und zurück an diesen Screen (handleKioskCommand → runtime.Quit)
 		select {
 		case a.kioskSend <- map[string]any{"action": "kiosk", "command": "quit"}:
 		default:
-			// Fallback falls WebSocket nicht verbunden: direkt beenden
 			runtime.Quit(a.ctx)
 		}
 	})
@@ -300,6 +303,13 @@ func (a *App) handleKioskCommand(msg map[string]any) {
 		log.Printf("[screen %d] Beende Prozess", a.screenIdx)
 		runtime.Quit(a.ctx)
 	}
+}
+
+// beforeClose wird von Wails beim Klick auf X aufgerufen.
+// Exit-Code 100 signalisiert dem Supervisor: bewusstes Beenden, kein Neustart.
+func (a *App) beforeClose(ctx context.Context) bool {
+	os.Exit(100)
+	return false
 }
 
 // ServerURL gibt die Basis-URL zurück (wird im Frontend verwendet)

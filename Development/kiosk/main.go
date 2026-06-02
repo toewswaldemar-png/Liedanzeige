@@ -50,6 +50,7 @@ func main() {
 		Title:            title,
 		Width:            width,
 		Height:           height,
+		StartHidden:      !cfg.Dev, // Fenster erst nach Positionierung anzeigen → kein Größensprung
 		AlwaysOnTop:      false,
 		Frameless:        false, // Rahmen immer aktiv — wird per Win32 für Vollbild entfernt
 		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 255},
@@ -58,6 +59,7 @@ func main() {
 		},
 		OnStartup:                app.startup,
 		OnDomReady:               app.domReady,
+		OnBeforeClose:            app.beforeClose,
 		Bind:                     []interface{}{app},
 		EnableDefaultContextMenu: false,
 		Windows: &windows.Options{

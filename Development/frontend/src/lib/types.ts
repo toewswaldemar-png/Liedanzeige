@@ -27,7 +27,7 @@ export const FONTS = [
 ] as const
 
 export const DEFAULTS: DisplaySettings = {
-  timeSize: 27,
+  timeSize: 75,
   gapTimeDate: 0,
   font: 'segoe-ui',
   resetDelay: 5,

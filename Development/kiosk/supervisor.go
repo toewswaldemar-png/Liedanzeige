@@ -22,6 +22,7 @@ type supervisor struct {
 
 type managedScreen struct {
 	idx         int
+	sup         *supervisor
 	mu          sync.Mutex
 	proc        *exec.Cmd
 	crashCount  int
@@ -56,7 +57,7 @@ func runSupervisor() {
 		screens: make([]*managedScreen, count),
 	}
 	for i := range sup.screens {
-		sup.screens[i] = &managedScreen{idx: i}
+		sup.screens[i] = &managedScreen{idx: i, sup: sup}
 	}
 
 	log.Printf("Supervisor — %d Screen(s), Server: %s:%d", count, cfg.ServerHost, cfg.Port)
@@ -64,6 +65,19 @@ func runSupervisor() {
 	for _, s := range sup.screens {
 		go s.run(exePath)
 	}
+
+	startQuitShortcut(func() {
+		log.Println("Beende Supervisor und alle Screens (Tastenkürzel)...")
+		for _, s := range sup.screens {
+			s.mu.Lock()
+			s.stopped = true
+			if s.proc != nil && s.proc.Process != nil {
+				_ = s.proc.Process.Kill()
+			}
+			s.mu.Unlock()
+		}
+		os.Exit(0)
+	})
 
 	sup.connectWS()
 }
@@ -96,6 +110,20 @@ func (s *managedScreen) run(exePath string) {
 		startTime := time.Now()
 		err := cmd.Wait()
 		runDuration := time.Since(startTime)
+
+		// Exit-Code 100 = bewusstes Beenden durch den Nutzer (X-Button)
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 100 {
+			log.Printf("[screen %d] vom Nutzer beendet — beende alle Screens", s.idx)
+			for _, other := range s.sup.screens {
+				other.mu.Lock()
+				other.stopped = true
+				if other.proc != nil && other.proc.Process != nil {
+					_ = other.proc.Process.Kill()
+				}
+				other.mu.Unlock()
+			}
+			os.Exit(0)
+		}
 
 		s.mu.Lock()
 		s.proc = nil

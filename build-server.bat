@@ -19,11 +19,11 @@ if %errorlevel% neq 0 (echo Frontend-Build fehlgeschlagen & pause & exit /b 1)
 
 echo === Server bauen ===
 cd /d "%~dp0Development\server"
-go build -o "%SERVER_DIR%\liedanzeige-server.exe" .
+go build -o "%SERVER_DIR%\Liedanzeige.exe" .
 if %errorlevel% neq 0 (echo Server-Build fehlgeschlagen & pause & exit /b 1)
 
 echo.
 echo === Fertig ===
-echo  Server: %SERVER_DIR%\liedanzeige-server.exe
+echo  Server: %SERVER_DIR%\Liedanzeige.exe
 echo.
 pause

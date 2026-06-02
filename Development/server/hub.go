@@ -67,7 +67,7 @@ func NewHub(cfg *AppConfig, settings *DisplaySettings, settingsPath string) *Hub
 
 // LogEvent schreibt einen Eintrag ins File-Log, puffert ihn und sendet ihn an alle /ws/log Clients.
 func (h *Hub) LogEvent(level, msg string) {
-	ts := time.Now().Format("15:04:05")
+	ts := time.Now().Format("02.01.2006 15:04:05")
 	log.Printf("[%s] %s", level, msg)
 	entry := Message{
 		"action":  "log",

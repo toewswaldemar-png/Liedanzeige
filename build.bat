@@ -22,14 +22,14 @@ if %errorlevel% neq 0 (echo Frontend-Build fehlgeschlagen & pause & exit /b 1)
 
 echo === Server bauen ===
 cd /d "%~dp0Development\server"
-go build -o "%SERVER_DIR%\liedanzeige-server.exe" .
+go build -o "%SERVER_DIR%\Liedanzeige.exe" .
 if %errorlevel% neq 0 (echo Server-Build fehlgeschlagen & pause & exit /b 1)
 
 echo === Kiosk bauen (Wails) ===
 cd /d "%~dp0Development\kiosk"
 wails build
 if %errorlevel% neq 0 (echo Kiosk-Build fehlgeschlagen & pause & exit /b 1)
-copy /y "build\bin\liedanzeige-kiosk.exe" "%KIOSK_DIR%\liedanzeige-kiosk.exe"
+copy /y "build\bin\Kiosk.exe" "%KIOSK_DIR%\Kiosk.exe"
 if %errorlevel% neq 0 (echo Kiosk-Kopieren fehlgeschlagen & pause & exit /b 1)
 
 echo.

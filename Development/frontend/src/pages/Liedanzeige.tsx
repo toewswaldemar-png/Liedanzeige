@@ -3,48 +3,79 @@ import { useWebSocket } from '@/hooks/useWebSocket'
 import { DEFAULTS, FONTS, type DisplaySettings } from '@/lib/types'
 import { STORAGE_KEY, loadSettings } from '@/lib/settings'
 
+// ── Gemeinsamer Rescale-Hook ──────────────────────────────────────────────────
+//
+// scale   (0–100): Wie viel Prozent der verfügbaren Breite der Text einnehmen soll.
+// fontKey (string): Font-Schlüssel aus den Settings — löst rescale bei Font-Wechsel aus.
+//
+// Algorithmus: Text auf 100 vw setzen → natürliche Breite messen → maxFit berechnen → scale anwenden.
+// Kein Grenzbereich, kein Flip, kein Vibrations-Problem.
+//
+// Font-Handling:
+//   - fontKey in useCallback-Deps → rescale wird neu erzeugt wenn Font wechselt
+//     (gecachte Fonts: sofortige korrekte Messung)
+//   - document.fonts.ready: behebt falsche Messung beim ersten Laden (Font noch nicht gecacht)
+//   - document.fonts 'loadingdone': behebt falsche Messung bei neu geladenem Font nach Wechsel
+
+function useScaledText(scale: number, fontKey: string, onHeight?: (h: number) => void) {
+  const wrapRef    = useRef<HTMLDivElement>(null)
+  const textRef    = useRef<HTMLDivElement>(null)
+  // Optionaler Mess-Anker: wenn belegt, wird dieses Element für die Breitenmessung
+  // genutzt (statt textRef). Ermöglicht fixen Referenz-Inhalt unabhängig vom angezeigten Text.
+  const measureRef = useRef<HTMLDivElement>(null)
+
+  const rescale = useCallback(() => {
+    const wrap  = wrapRef.current
+    const text  = textRef.current
+    if (!wrap || !text) return
+    // measureRef nutzen wenn vorhanden, sonst textRef
+    const probe = measureRef.current ?? textRef.current
+    if (!probe) return
+    probe.style.fontSize = '100vw'
+    void probe.offsetWidth
+    const available = wrap.offsetWidth
+    const natural   = probe.scrollWidth
+    if (natural <= 0 || available <= 0) return
+    const ref100 = parseFloat(getComputedStyle(probe).fontSize) // px-Wert von 100vw
+    const maxFit = ref100 * available / natural                  // Schriftgröße die genau 100% füllt
+    const scaled = Math.floor(maxFit * scale / 100)
+    text.style.fontSize  = `${scaled}px`
+    probe.style.fontSize = `${scaled}px`  // probe zurücksetzen
+    wrap.style.height    = `${scaled}px`
+    onHeight?.(scaled)                    // Höhe nach oben melden (für Gap-Berechnung)
+  }, [scale, fontKey, onHeight])  // fontKey als Dep → rescale wird bei Font-Wechsel neu erzeugt
+
+  useEffect(() => {
+    window.addEventListener('resize', rescale)
+    return () => window.removeEventListener('resize', rescale)
+  }, [rescale])
+
+  useEffect(() => {
+    // Gecachte Fonts: useLayoutEffect reicht. Nicht-gecachte Fonts: nach Laden nochmal messen.
+    document.fonts.ready.then(rescale)
+    document.fonts.addEventListener('loadingdone', rescale)
+    return () => document.fonts.removeEventListener('loadingdone', rescale)
+  }, [rescale])
+
+  return { wrapRef, textRef, measureRef, rescale }
+}
+
 // ── Subkomponenten ────────────────────────────────────────────────────────────
 
-function ClockFace({ style }: { style: React.CSSProperties }) {
+function ClockFace({ style, scale, fontKey, sizeRef, onHeight }: { style: React.CSSProperties; scale: number; fontKey: string; sizeRef?: string; onHeight?: (h: number) => void }) {
   const [time, setTime] = useState(() => new Date().toTimeString().slice(0, 5))
-  const wrapRef  = useRef<HTMLDivElement>(null)
-  const textRef  = useRef<HTMLDivElement>(null)
-  // CSS-Variable-Referenz als Basis für die Messung merken
-  const baseSize = useRef<string>((style.fontSize as string) ?? '')
+  const { wrapRef, textRef, measureRef, rescale } = useScaledText(scale, fontKey, onHeight)
 
   useEffect(() => {
     const id = setInterval(() => setTime(new Date().toTimeString().slice(0, 5)), 1000)
     return () => clearInterval(id)
   }, [])
 
-  // Passt font-size (px) so an, dass der Text nie breiter als der Wrapper ist.
-  // Funktioniert unabhängig von Schrift und Viewport: kein transform, kein clip-Problem.
-  const rescale = useCallback(() => {
-    const wrap = wrapRef.current
-    const text = textRef.current
-    if (!wrap || !text) return
-    // Zur CSS-Variable zurücksetzen, dann natürliche Breite messen
-    text.style.fontSize = baseSize.current
-    const available = wrap.offsetWidth
-    const natural   = text.scrollWidth
-    if (natural > available && natural > 0) {
-      const base = parseFloat(getComputedStyle(text).fontSize)
-      text.style.fontSize = `${Math.floor(base * available / natural)}px`
-    }
-  }, [])
-
-  // baseSize-Ref vor rescale aktualisieren (Hooks laufen in Definitionsreihenfolge)
-  useLayoutEffect(() => { if (style.fontSize) baseSize.current = style.fontSize as string }, [style.fontSize])
-  useLayoutEffect(rescale, [rescale, style, time])
-
-  useEffect(() => {
-    const obs = new ResizeObserver(rescale)
-    if (wrapRef.current) obs.observe(wrapRef.current)
-    return () => obs.disconnect()
-  }, [rescale])
+  // Nur bei scale-Änderung rescalen — time-Änderung ist mit tabular-nums immer gleich breit
+  useLayoutEffect(rescale, [rescale])
 
   return (
-    <div ref={wrapRef} style={{ width: '95vw', height: style.fontSize, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div ref={wrapRef} style={{ width: '95vw', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div
         ref={textRef}
         className="font-bold tabular-nums"
@@ -52,6 +83,12 @@ function ClockFace({ style }: { style: React.CSSProperties }) {
       >
         {time.split('').map((ch, i) => <span key={i}>{ch}</span>)}
       </div>
+      {sizeRef && (
+        <div ref={measureRef} aria-hidden className="font-bold tabular-nums"
+          style={{ ...style, lineHeight: 1, whiteSpace: 'nowrap', visibility: 'hidden', position: 'absolute', pointerEvents: 'none' }}>
+          {sizeRef}
+        </div>
+      )}
     </div>
   )
 }
@@ -60,31 +97,61 @@ function formatDate(d: Date) {
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`
 }
 
-function DateLine() {
+function DateLine({ style, scale, fontKey, onHeight }: { style: React.CSSProperties; scale: number; fontKey: string; onHeight?: (h: number) => void }) {
   const [date, setDate] = useState(() => formatDate(new Date()))
+  const { wrapRef, textRef, rescale } = useScaledText(scale, fontKey, onHeight)
 
   useEffect(() => {
     const now = new Date()
     const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
     let intervalId: ReturnType<typeof setInterval> | null = null
-
     const timeout = setTimeout(() => {
       setDate(formatDate(new Date()))
       intervalId = setInterval(() => setDate(formatDate(new Date())), 86_400_000)
     }, +next - +now)
-
-    return () => {
-      clearTimeout(timeout)
-      if (intervalId) clearInterval(intervalId)
-    }
+    return () => { clearTimeout(timeout); if (intervalId) clearInterval(intervalId) }
   }, [])
 
+  useLayoutEffect(rescale, [rescale])
+
   return (
-    <div
-      className="text-center font-bold"
-      style={{ fontSize: 'var(--date-font-size)', lineHeight: 1, textShadow: 'var(--text-shadow)' }}
-    >
-      {date}
+    <div ref={wrapRef} style={{ width: '95vw', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div
+        ref={textRef}
+        className="font-bold tabular-nums"
+        style={{ ...style, lineHeight: 1, whiteSpace: 'nowrap' }}
+      >
+        {date}
+      </div>
+    </div>
+  )
+}
+
+function NumberDisplay({ value, style, scale, fontKey, onHeight }: { value: string; style: React.CSSProperties; scale: number; fontKey: string; onHeight?: (h: number) => void }) {
+  const { wrapRef, textRef, measureRef, rescale } = useScaledText(scale, fontKey, onHeight)
+
+  // Nur bei scale/fontKey rescalen — nicht bei jedem Tastendruck.
+  // Größe basiert auf dem Referenz-Inhalt "0000", nicht auf der aktuellen Eingabe.
+  useLayoutEffect(rescale, [rescale])
+
+  return (
+    <div ref={wrapRef} style={{ width: '95vw', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div
+        ref={textRef}
+        className="font-bold tabular-nums"
+        style={{ ...style, lineHeight: 1, whiteSpace: 'nowrap' }}
+      >
+        {value}
+      </div>
+      {/* Referenz "00:00" → selbe Breite wie Uhrzeit "HH:MM" → Zahl gleich groß wie Uhrzeit im Uhrmodus */}
+      <div
+        ref={measureRef}
+        aria-hidden
+        className="font-bold tabular-nums"
+        style={{ ...style, lineHeight: 1, whiteSpace: 'nowrap', visibility: 'hidden', position: 'absolute', pointerEvents: 'none' }}
+      >
+        00:00
+      </div>
     </div>
   )
 }
@@ -94,6 +161,7 @@ function DateLine() {
 export default function Liedanzeige({ kanal }: { kanal: string }) {
   const [settings, setSettings] = useState<DisplaySettings>(loadSettings)
   const [inputNumbers, setInputNumbers] = useState('')
+  const isInputMode = inputNumbers.length > 0
   const [showOverlay, setShowOverlay] = useState(false)
   const [everConnected, setEverConnected] = useState(false)
   const [blackout, setBlackout] = useState(false)
@@ -109,8 +177,6 @@ export default function Liedanzeige({ kanal }: { kanal: string }) {
     document.title = kanal === 'lied' ? 'Liedanzeige' : 'Choranzeige'
   }, [kanal])
 
-  // Overlay nur zeigen wenn Verbindung nach erfolgreichem Connect abbricht —
-  // nicht beim ersten Laden (der Kiosk-Overlay deckt diesen Fall ab).
   useEffect(() => {
     if (connected) {
       setEverConnected(true)
@@ -122,52 +188,81 @@ export default function Liedanzeige({ kanal }: { kanal: string }) {
     return () => clearTimeout(id)
   }, [connected, everConnected])
 
-  // CSS-Variablen anwenden
+  // CSS-Variablen — font-size wird von den Komponenten selbst gesetzt; gap via applyGap
   useEffect(() => {
     const r = document.documentElement.style
     const fontObj = FONTS.find(f => f.key === settings.font) ?? FONTS[0]
-    r.setProperty('--time-small-font-size', `${settings.timeSize}vw`)
-    r.setProperty('--time-large-font-size', `${Math.round(settings.timeSize * 0.74)}vw`)
-    r.setProperty('--date-font-size',       `${Math.round(settings.timeSize * 0.52)}vw`)
-    r.setProperty('--gap-time-date',        `${settings.gapTimeDate}px`)
-    r.setProperty('--font-family',          fontObj.value)
+    r.setProperty('--font-family', fontObj.value)
     const opacity = (settings.shadowStrength / 100).toFixed(2)
-    r.setProperty('--text-shadow',          `10px 10px 12px rgba(0,0,0,${opacity})`)
+    // em-Einheiten: CSS-Variable wird an der Verwendungsstelle aufgelöst →
+    // Schatten skaliert proportional zur Schriftgröße des jeweiligen Elements
+    r.setProperty('--text-shadow', `0.025em 0.025em 0.04em rgba(0,0,0,${opacity})`)
   }, [settings])
 
-  // Auto-Reset-Timer: React-idiomatisch via Effect-Cleanup.
-  // Läuft nur wenn Zahlen angezeigt werden; wird automatisch gecleant wenn
-  // inputNumbers → '' oder resetDelay sich ändert.
+  // ── Prozentualer Abstand ──────────────────────────────────────────────────────
+  // Abstand = gapTimeDate% × (viewport_height − h1 − h2)
+  // Alle Werte in Refs → keine Re-Render-Schleife.
+  const heightsRef  = useRef({ clockClock: 0, clockDate: 0, inputNum: 0, inputClock: 0 })
+  const gapPctRef   = useRef(settings.gapTimeDate)
+  const modeRef     = useRef(false) // isInputMode
+
+  const applyGap = useCallback(() => {
+    const h = heightsRef.current
+    const [h1, h2] = modeRef.current
+      ? [h.inputNum, h.inputClock]
+      : [h.clockClock, h.clockDate]
+    if (h1 <= 0 || h2 <= 0) return   // Höhen noch nicht bekannt
+    const remaining = Math.max(0, window.innerHeight - h1 - h2)
+    const gapPx = Math.floor(remaining * gapPctRef.current / 100)
+    document.documentElement.style.setProperty('--gap-time-date', `${gapPx}px`)
+  }, [])
+
+  // Gap bei Prozent-Änderung neu berechnen
+  useEffect(() => {
+    gapPctRef.current = settings.gapTimeDate
+    applyGap()
+  }, [settings.gapTimeDate, applyGap])
+
+  // Gap bei Modus-Wechsel neu berechnen
+  useEffect(() => {
+    modeRef.current = isInputMode
+    applyGap()
+  }, [isInputMode, applyGap])
+
+  // Gap bei Viewport-Größenänderung neu berechnen
+  useEffect(() => {
+    window.addEventListener('resize', applyGap)
+    return () => window.removeEventListener('resize', applyGap)
+  }, [applyGap])
+
+  // Callbacks für Höhen-Updates aus den Komponenten
+  const onClockClockH = useCallback((h: number) => { heightsRef.current.clockClock = h; applyGap() }, [applyGap])
+  const onClockDateH  = useCallback((h: number) => { heightsRef.current.clockDate  = h; applyGap() }, [applyGap])
+  const onInputNumH   = useCallback((h: number) => { heightsRef.current.inputNum   = h; applyGap() }, [applyGap])
+  const onInputClockH = useCallback((h: number) => { heightsRef.current.inputClock = h; applyGap() }, [applyGap])
+
   useEffect(() => {
     if (inputNumbers.length === 0) return
     const id = setTimeout(() => setInputNumbers(''), settings.resetDelay * 60 * 1000)
     return () => clearTimeout(id)
   }, [inputNumbers, settings.resetDelay])
 
-  // USB-Numpad (nur Chor-Kanal, Fallback für Browser-Tests ohne Kiosk):
-  // Im Kiosk übernimmt der globale Go-Hook in numpad.go — dort werden Tasten
-  // bereits geschluckt und erreichen diesen Handler nicht mehr.
   useEffect(() => {
     if (kanal !== 'chor') return
-
     function onKeyDown(e: KeyboardEvent) {
-      // Numpad-Tasten: location === 3; Sondertasten (Calc, Media, …): eigene e.code-Präfixe
       const isNumpad = e.location === 3 || e.code === 'NumLock'
       const isExtra = /^(Launch|Media|Audio|Browser|Sleep|WakeUp|Power)/.test(e.code)
       if (!isNumpad && !isExtra) return
-
       if (/^Numpad[0-9]$/.test(e.code)) {
         send({ action: 'input', key: e.code.slice(-1), target: 'chor' })
       } else {
         send({ action: 'reset', target: 'chor' })
       }
     }
-
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [kanal, send])
 
-  // Pure Updater — keine Seiteneffekte im setState-Callback
   const handleInput = useCallback((key: string) => {
     setInputNumbers(prev => prev.length >= 4 ? prev : prev + key)
   }, [])
@@ -193,10 +288,7 @@ export default function Liedanzeige({ kanal }: { kanal: string }) {
     }
   }, [lastMessage, handleInput, handleBackspace])
 
-  const isInputMode = inputNumbers.length > 0
-
-  const timeSmallStyle: React.CSSProperties = { fontSize: 'var(--time-small-font-size)', lineHeight: 1, textShadow: 'var(--text-shadow)' }
-  const timeLargeStyle: React.CSSProperties = { fontSize: 'var(--time-large-font-size)', lineHeight: 1, textShadow: 'var(--text-shadow)' }
+  const baseStyle: React.CSSProperties = { lineHeight: 1, textShadow: 'var(--text-shadow)' }
 
   return (
     <div
@@ -211,26 +303,23 @@ export default function Liedanzeige({ kanal }: { kanal: string }) {
           <span className="font-sans text-base text-black animate-pulse">Verbinde mit Server…</span>
         </div>
       )}
+
       <div className="flex flex-col items-center" style={{ gap: 'var(--gap-time-date)' }}>
 
         {/* Uhrmodus */}
         {!isInputMode && (
-          <div className="flex flex-col" style={{ width: 'fit-content', gap: 'var(--gap-time-date)' }}>
-            <ClockFace style={timeSmallStyle} />
-            <DateLine />
+          <div className="flex flex-col items-center" style={{ gap: 'var(--gap-time-date)' }}>
+            <ClockFace style={baseStyle} scale={settings.timeSize} fontKey={settings.font} onHeight={onClockClockH} />
+            <DateLine  style={baseStyle} scale={settings.timeSize} fontKey={settings.font} onHeight={onClockDateH} />
           </div>
         )}
 
         {/* Eingabemodus: Zahl + verkleinerte Uhr */}
         {isInputMode && (
           <>
-            <div
-              className="flex items-center justify-center font-bold"
-              style={{ fontSize: 'var(--time-small-font-size)', height: 'var(--time-small-font-size)', lineHeight: 1, textShadow: 'var(--text-shadow)' }}
-            >
-              {inputNumbers}
-            </div>
-            <ClockFace style={timeLargeStyle} />
+            <NumberDisplay value={inputNumbers} style={baseStyle} scale={settings.timeSize} fontKey={settings.font} onHeight={onInputNumH} />
+            {/* sizeRef="00.00.0000" → selbe Breite wie Datum → Uhr hier gleich groß wie Datum im Uhrmodus */}
+            <ClockFace style={baseStyle} scale={settings.timeSize} fontKey={settings.font} sizeRef="00.00.0000" onHeight={onInputClockH} />
           </>
         )}
 

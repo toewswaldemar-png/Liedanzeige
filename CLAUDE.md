@@ -22,7 +22,7 @@ build-kiosk.bat    :: nur Kiosk
 ```
 `npm install` wird automatisch nachgeholt wenn `frontend/node_modules/` fehlt. Alle Skripte pausieren bei Fehler.
 
-> **Kiosk-Build:** `build-kiosk.bat` ruft `wails build -skipbindings` auf. Der Wails-Binding-Generator hängt sich auf diesem System auf; `-skipbindings` überspringt ihn sicher, da sich die gebundenen Go-Typen selten ändern. Wails legt die EXE zunächst in `Development/kiosk/build/bin/` ab — das Skript kopiert sie nach `_build/Kiosk/liedanzeige-kiosk.exe` und löscht `build/bin/` danach automatisch. Das Verzeichnis `Development/kiosk/build/` (Icons, Manifests) bleibt erhalten.
+> **Kiosk-Build:** `build-kiosk.bat` ruft `wails build -skipbindings` auf. Der Wails-Binding-Generator hängt sich auf diesem System auf; `-skipbindings` überspringt ihn sicher, da sich die gebundenen Go-Typen selten ändern. Wails legt die EXE zunächst in `Development/kiosk/build/bin/` ab — das Skript kopiert sie nach `_build/Kiosk/Kiosk.exe` und löscht `build/bin/` danach automatisch. Das Verzeichnis `Development/kiosk/build/` (Icons, Manifests) bleibt erhalten.
 
 > **Wichtig:** Der Go-Server bettet die Frontend-Dateien per `//go:embed static` zur Compile-Zeit ein. Nach jeder Frontend-Änderung muss deshalb **auch der Go-Server neu gebaut werden** — `npm run build` allein reicht nicht. Schnellster Weg: `build-server.bat` (baut Frontend + Server in einem Schritt).
 
@@ -31,9 +31,9 @@ Ausgabe in `_build/` (Repo-Root):
 ```
 _build/
 ├── Server/
-│   └── liedanzeige-server.exe
+│   └── Liedanzeige.exe
 └── Kiosk/
-    └── liedanzeige-kiosk.exe   (Supervisor + Kiosk in einer Binary)
+    └── Kiosk.exe   (Supervisor + Kiosk in einer Binary)
 ```
 
 `config.json` jeweils im entsprechenden Unterordner ablegen — Vorlage: `config.example.json` im Repo-Root. `settings.json` wird vom Server automatisch in `_build/Server/` angelegt — nicht manuell erstellen oder löschen.

@@ -6,9 +6,9 @@
   "StringFileInfo": {
     "CompanyName": "",
     "FileDescription": "Liedanzeige Server",
-    "InternalName": "liedanzeige-server",
+    "InternalName": "Liedanzeige",
     "LegalCopyright": "",
-    "OriginalFilename": "liedanzeige-server.exe",
+    "OriginalFilename": "Liedanzeige.exe",
     "ProductName": "Liedanzeige"
   },
   "VarFileInfo": { "Translation": { "LangID": "0407", "CharsetID": "04B0" } },

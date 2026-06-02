@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BookOpenText, ExternalLink, Maximize2, Minimize2, Monitor, RotateCw, Settings2, Terminal, Trash2, X } from 'lucide-react'
+import { BookOpenText, ExternalLink, Maximize2, Minimize2, Monitor, RotateCw, Settings2, Trash2, X } from 'lucide-react'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useLogSocket } from '@/hooks/useLogSocket'
 import { LogPanel } from '@/components/LogPanel'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { FONTS, type DisplaySettings } from '@/lib/types'
 import { STORAGE_KEY, loadSettings } from '@/lib/settings'
@@ -170,7 +170,6 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
     }
   }, [confirmQuit, kioskCmd])
 
-  const [logOpen, setLogOpen] = useState(false)
   const { entries: logEntries, clear: clearLog } = useLogSocket(kanal === 'lied')
 
   return (
@@ -196,17 +195,6 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
         <div className="flex items-center gap-2">
           {target === 'lied' && (
             <>
-              <button
-                onClick={e => { e.stopPropagation(); setLogOpen(v => !v) }}
-                className={cn(
-                  'inline-flex items-center justify-center h-8 w-8 rounded-lg border transition-colors',
-                  logOpen
-                    ? 'bg-zinc-900 text-white border-zinc-700 hover:bg-zinc-700 hover:text-white'
-                    : 'border-input bg-background hover:bg-accent hover:text-accent-foreground'
-                )}
-              >
-                <Terminal className="w-4 h-4" />
-              </button>
               <button
                 onClick={e => { e.stopPropagation(); setSettingsOpen(v => !v) }}
                 className={cn(
@@ -298,9 +286,6 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
         </div>
       </div>
 
-      {/* ── Log-Panel ── */}
-      {target === 'lied' && logOpen && <LogPanel entries={logEntries} onClear={clearLog} />}
-
       {/* ── Einstellungs-Panel ── */}
       {settingsOpen && (
         <>
@@ -336,13 +321,13 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
               {/* ── Darstellung ── */}
               <SettingsSection title="Darstellung">
                 <SliderRow
-                  label="Schriftgröße" value={`${settings.timeSize} vw`}
-                  min={10} max={45} step={1} sliderValue={settings.timeSize}
+                  label="Schriftgröße" value={`${settings.timeSize} %`}
+                  min={10} max={100} step={1} sliderValue={settings.timeSize}
                   onChange={v => updateSetting('timeSize', v)}
                 />
                 <SliderRow
-                  label="Abstand Uhrzeit–Datum" value={`${settings.gapTimeDate} px`}
-                  min={0} max={100} step={2} sliderValue={settings.gapTimeDate}
+                  label="Abstand Uhrzeit–Datum" value={`${settings.gapTimeDate} %`}
+                  min={0} max={100} step={1} sliderValue={settings.gapTimeDate}
                   onChange={v => updateSetting('gapTimeDate', v)}
                 />
                 <SliderRow
@@ -361,10 +346,14 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
               <SettingsSection title="Schrift">
                 <Select value={settings.font} onValueChange={v => { if (v) updateSetting('font', v) }}>
                   <SelectTrigger className="h-9 w-48 bg-white border-zinc-200 text-zinc-800">
-                    <SelectValue />
+                    {(() => { const f = FONTS.find(f => f.key === settings.font) ?? FONTS[0]; return <span style={{ fontFamily: f.value }}>{f.label}</span> })()}
                   </SelectTrigger>
                   <SelectContent>
-                    {FONTS.map(f => <SelectItem key={f.key} value={f.key}>{f.label}</SelectItem>)}
+                    {FONTS.map(f => (
+                      <SelectItem key={f.key} value={f.key} label={f.label}>
+                        <span style={{ fontFamily: f.value }}>{f.label}</span>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </SettingsSection>
@@ -406,7 +395,7 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
                     )}
                   >
                     <X className="w-4 h-4" />
-                    {confirmQuit ? 'Wirklich?' : 'Beenden'}
+                    {confirmQuit ? 'Sicher?' : 'Beenden'}
                   </button>
                 </div>
               </SettingsSection>
@@ -429,6 +418,13 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
                   ))}
                 </div>
               </SettingsSection>
+
+              {/* ── Server-Log ── */}
+              {target === 'lied' && (
+                <div className="rounded-xl overflow-hidden border border-zinc-200 shadow-sm">
+                  <LogPanel entries={logEntries} onClear={clearLog} />
+                </div>
+              )}
 
             </div>
           </div>

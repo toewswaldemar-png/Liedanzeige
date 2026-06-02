@@ -45,7 +45,7 @@ var defaultConfig = AppConfig{
 }
 
 var defaultSettings = DisplaySettings{
-	TimeSize:       27,
+	TimeSize:       75,
 	GapTimeDate:    0,
 	Font:           "segoe-ui",
 	ShadowStrength: 40,

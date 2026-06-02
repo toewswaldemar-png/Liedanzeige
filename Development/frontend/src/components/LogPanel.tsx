@@ -44,7 +44,9 @@ export function LogPanel({ entries, onClear }: Props) {
         )}
         {entries.map((e, i) => (
           <div key={i} className={cn('flex gap-2 text-xs font-mono leading-snug', levelColor(e.level))}>
-            <span className="text-zinc-600 shrink-0">{e.ts}</span>
+            <span className="text-zinc-600 shrink-0 flex flex-col leading-tight">
+              {e.ts.split(' ').map((part, i) => <span key={i}>{part}</span>)}
+            </span>
             <span className="break-all">{e.message}</span>
           </div>
         ))}
