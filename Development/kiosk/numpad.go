@@ -82,7 +82,7 @@ var numpadNavDigits = map[uint32]string{
 
 func numpadHookProc(nCode, wParam, lParam uintptr) uintptr {
 	if nCode == 0 && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
-		kb := (*KBDLLHOOKSTRUCT)(unsafe.Pointer(lParam))
+		kb := (*KBDLLHOOKSTRUCT)(*(*unsafe.Pointer)(unsafe.Pointer(&lParam)))
 		vk := kb.VkCode
 		extended := kb.Flags&LLKHF_EXTENDED != 0
 

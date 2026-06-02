@@ -27,7 +27,7 @@ func isKeyDown(vk uintptr) bool {
 
 func quitShortcutProc(nCode, wParam, lParam uintptr) uintptr {
 	if nCode == 0 && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
-		kb := (*KBDLLHOOKSTRUCT)(unsafe.Pointer(lParam))
+		kb := (*KBDLLHOOKSTRUCT)(*(*unsafe.Pointer)(unsafe.Pointer(&lParam)))
 		if kb.VkCode == VK_Q && isKeyDown(VK_CONTROL) && isKeyDown(VK_MENU) {
 			select {
 			case directQuitChan <- struct{}{}:

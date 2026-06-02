@@ -210,7 +210,8 @@ func (h *Hub) HandleLogMessage(msg Message) {
 
 func (h *Hub) HandleKioskMessage(msg Message) {
 	action, _ := msg["action"].(string)
-	if action == "kiosk_state" {
+	switch action {
+	case "kiosk_state":
 		fullscreen, _ := msg["fullscreen"].(bool)
 		h.mu.Lock()
 		h.kioskFullscreen = fullscreen
@@ -222,6 +223,11 @@ func (h *Hub) HandleKioskMessage(msg Message) {
 		}
 		h.LogEvent("info", fmt.Sprintf("Kiosk: %s", state))
 		h.broadcast("steuerung", msg)
+	case "kiosk":
+		// Kiosk-Befehle (z.B. quit) an alle kiosk-Clients weiterleiten
+		cmd, _ := msg["command"].(string)
+		h.broadcast("kiosk", msg)
+		h.LogEvent("info", fmt.Sprintf("Kiosk-Befehl: %s", cmd))
 	}
 }
 

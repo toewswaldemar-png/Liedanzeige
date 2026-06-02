@@ -45,7 +45,7 @@ func getMonitorRects() []monitorRect {
 	var rects []monitorRect
 	cb := syscall.NewCallback(func(_, _, lprcMonitor, _ uintptr) uintptr {
 		type RECT struct{ Left, Top, Right, Bottom int32 }
-		r := (*RECT)(unsafe.Pointer(lprcMonitor))
+		r := (*RECT)(*(*unsafe.Pointer)(unsafe.Pointer(&lprcMonitor)))
 		rects = append(rects, monitorRect{
 			X: int(r.Left), Y: int(r.Top),
 			W: int(r.Right - r.Left), H: int(r.Bottom - r.Top),
