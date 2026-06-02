@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WsMessage } from '@/lib/types'
 
-export function useWebSocket(channel: string) {
+export function useWebSocket(channel: string, enabled = true) {
   const [lastMessage, setLastMessage] = useState<WsMessage | null>(null)
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -31,6 +32,7 @@ export function useWebSocket(channel: string) {
       ws.onclose = () => {
         if (cancelled) return
         setConnected(false)
+        if (timer) clearTimeout(timer)
         timer = setTimeout(connect, 2000)
       }
 
@@ -38,6 +40,7 @@ export function useWebSocket(channel: string) {
         ws.onclose = null
         if (cancelled) return
         setConnected(false)
+        if (timer) clearTimeout(timer)
         timer = setTimeout(connect, 2000)
       }
     }
@@ -54,7 +57,7 @@ export function useWebSocket(channel: string) {
         wsRef.current = null
       }
     }
-  }, [channel])
+  }, [channel, enabled])
 
   const send = useCallback((msg: WsMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

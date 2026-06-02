@@ -103,8 +103,7 @@ export default function Liedanzeige({ kanal }: { kanal: string }) {
     return () => { delete (window as any).__kioskBlackout }
   }, [])
 
-  const { lastMessage, connected } = useWebSocket(kanal)
-  const { send: sendSteuerung } = useWebSocket('steuerung')
+  const { lastMessage, connected, send } = useWebSocket(kanal)
 
   useEffect(() => {
     document.title = kanal === 'lied' ? 'Liedanzeige' : 'Choranzeige'
@@ -158,15 +157,15 @@ export default function Liedanzeige({ kanal }: { kanal: string }) {
       if (!isNumpad && !isExtra) return
 
       if (/^Numpad[0-9]$/.test(e.code)) {
-        sendSteuerung({ action: 'input', key: e.code.slice(-1), target: 'chor' })
+        send({ action: 'input', key: e.code.slice(-1), target: 'chor' })
       } else {
-        sendSteuerung({ action: 'reset', target: 'chor' })
+        send({ action: 'reset', target: 'chor' })
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [kanal, sendSteuerung])
+  }, [kanal, send])
 
   // Pure Updater — keine Seiteneffekte im setState-Callback
   const handleInput = useCallback((key: string) => {

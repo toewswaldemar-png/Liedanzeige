@@ -3,6 +3,7 @@
 
 # Abhängigkeiten
 Development/frontend/node_modules/
+Development/kiosk/frontend/node_modules/
 
 # Gebautes Frontend (npm run build)
 Development/server/static/

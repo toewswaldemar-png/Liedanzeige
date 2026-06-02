@@ -185,6 +185,8 @@ func (a *App) connectKioskWS() {
 
 // goFullscreen setzt Vollbild und meldet den State.
 func (a *App) goFullscreen() {
+	stopTitleBarHook()
+	runtime.WindowExecJS(a.ctx, `var d=document.getElementById('__kiosk_tb__');if(d)d.remove();`)
 	if r, ok := a.monitorRect(); ok {
 		setWindowPos(r, true)
 	}
@@ -221,6 +223,26 @@ func (a *App) handleKioskCommand(msg map[string]any) {
 				cascade := a.screenIdx * 40
 				setWindowPos(monitorRect{X: r.X + cascade, Y: r.Y + cascade, W: r.W / 2, H: r.H / 2}, false)
 			}
+			startTitleBarHook()
+			runtime.WindowExecJS(a.ctx, `
+				(function(){
+					if(document.getElementById('__kiosk_tb__')) return;
+					var d=document.createElement('div');
+					d.id='__kiosk_tb__';
+					d.style.cssText='position:fixed;top:0;left:0;right:0;height:28px;background:rgba(20,20,20,0.92);z-index:2147483647;display:flex;align-items:center;box-sizing:border-box;backdrop-filter:blur(6px);user-select:none;-webkit-user-select:none;';
+					var title=document.createElement('span');
+					title.style.cssText='flex:1;padding:0 12px;color:rgba(255,255,255,0.6);font-size:11px;font-family:system-ui,sans-serif;letter-spacing:0.06em;pointer-events:none;';
+					title.textContent='Liedanzeige';
+					d.appendChild(title);
+					[['–',false],['□',false],['×',true]].forEach(function(b){
+						var btn=document.createElement('div');
+						btn.style.cssText='width:46px;height:28px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7);font-size:13px;pointer-events:none;';
+						btn.textContent=b[0];
+						d.appendChild(btn);
+					});
+					document.body.appendChild(d);
+				})()
+			`)
 		}()
 	case "move_to":
 		screenF, _ := msg["screen"].(float64)

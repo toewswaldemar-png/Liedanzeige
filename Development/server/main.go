@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -95,7 +96,14 @@ func main() {
 		}
 		defer conn.Close()
 
-		client := &Client{conn: conn}
+		addr := conn.RemoteAddr().String()
+		if host, _, err := net.SplitHostPort(addr); err == nil {
+			addr = host
+		}
+		if addr == "::1" || addr == "127.0.0.1" {
+			addr = "localhost"
+		}
+		client := &Client{conn: conn, addr: addr}
 
 		conn.SetReadDeadline(time.Now().Add(pongWait))
 		conn.SetPongHandler(func(string) error {
@@ -135,6 +143,14 @@ func main() {
 				if json.Unmarshal(data, &msg) == nil {
 					hub.HandleSteuerung(msg)
 				}
+			} else if channel == "chor" {
+				var msg Message
+				if json.Unmarshal(data, &msg) == nil {
+					// Numpad-Fallback vom Chor-Display: input/reset weiterleiten
+					if action, _ := msg["action"].(string); action == "input" || action == "reset" {
+						hub.HandleSteuerung(msg)
+					}
+				}
 			} else if channel == "kiosk" {
 				var msg Message
 				if json.Unmarshal(data, &msg) == nil {
@@ -169,10 +185,7 @@ func main() {
 	})
 
 	bindAddr := fmt.Sprintf(":%d", cfg.Port)
-	log.Printf("Server hoert auf %s:%d", cfg.ServerHost, cfg.Port)
 	go func() {
-		// Kurz warten bis ListenAndServe den Port gebunden hat, dann ins Log
-		// (LogEvent jetzt, da noch keine WS-Clients verbunden sein koennen)
 		hub.LogEvent("info", fmt.Sprintf("Server bereit: %s:%d", cfg.ServerHost, cfg.Port))
 	}()
 	log.Fatal(http.ListenAndServe(bindAddr, mux))

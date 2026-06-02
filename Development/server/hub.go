@@ -17,6 +17,7 @@ type Message map[string]any
 type Client struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
+	addr string
 }
 
 func (c *Client) writeMessage(messageType int, data []byte) error {
@@ -36,10 +37,12 @@ type Hub struct {
 	settings        DisplaySettings
 	cfg             *AppConfig
 	settingsPath    string
-	settingsMu        sync.Mutex // serialisiert Schreibzugriffe auf settings.json
-	settingsLogTimer  *time.Timer
-	settingsLogTimeMu sync.Mutex
-	monitorsSwapped   bool
+	settingsMu          sync.Mutex // serialisiert Schreibzugriffe auf settings.json
+	settingsLogTimer    *time.Timer
+	settingsLogTimeMu   sync.Mutex
+	disconnectTimers    map[string]*time.Timer
+	disconnectTimersMu  sync.Mutex
+	monitorsSwapped     bool
 	kioskFullscreen bool
 	kioskStateKnown bool
 	logHistory      []Message
@@ -55,9 +58,10 @@ func NewHub(cfg *AppConfig, settings *DisplaySettings, settingsPath string) *Hub
 			"kiosk":     {},
 			"log":       {},
 		},
-		settings:     *settings,
-		cfg:          cfg,
-		settingsPath: settingsPath,
+		settings:         *settings,
+		cfg:              cfg,
+		settingsPath:     settingsPath,
+		disconnectTimers: make(map[string]*time.Timer),
 	}
 }
 
@@ -86,6 +90,7 @@ func (h *Hub) Register(channel string, client *Client) {
 		h.clients[channel] = make(map[*Client]bool)
 	}
 	h.clients[channel][client] = true
+	isFirst := len(h.clients[channel]) == 1
 	h.mu.Unlock()
 
 	// Log-Kanal: History sofort senden, kein Connect-Event loggen
@@ -102,7 +107,19 @@ func (h *Hub) Register(channel string, client *Client) {
 		return
 	}
 
-	h.LogEvent("info", fmt.Sprintf("verbunden: %s", channel))
+	// Disconnect-Timer für diesen Channel abbrechen (Reload-Erkennung)
+	h.disconnectTimersMu.Lock()
+	if t, ok := h.disconnectTimers[channel]; ok {
+		t.Stop()
+		delete(h.disconnectTimers, channel)
+		h.disconnectTimersMu.Unlock()
+		// kein Log — Reload, stiller Reconnect
+	} else {
+		h.disconnectTimersMu.Unlock()
+		if isFirst {
+			h.LogEvent("info", fmt.Sprintf("verbunden: %s (%s)", channel, client.addr))
+		}
+	}
 
 	if channel == "steuerung" {
 		h.mu.RLock()
@@ -148,9 +165,23 @@ func (h *Hub) Register(channel string, client *Client) {
 func (h *Hub) Unregister(channel string, client *Client) {
 	h.mu.Lock()
 	delete(h.clients[channel], client)
+	isEmpty := len(h.clients[channel]) == 0
 	h.mu.Unlock()
 	if channel != "log" {
-		h.LogEvent("info", fmt.Sprintf("getrennt: %s", channel))
+		if isEmpty {
+			ch := channel
+			h.disconnectTimersMu.Lock()
+			if t, ok := h.disconnectTimers[ch]; ok {
+				t.Stop()
+			}
+			h.disconnectTimers[ch] = time.AfterFunc(500*time.Millisecond, func() {
+				h.disconnectTimersMu.Lock()
+				delete(h.disconnectTimers, ch)
+				h.disconnectTimersMu.Unlock()
+				h.LogEvent("info", fmt.Sprintf("getrennt: %s", ch))
+			})
+			h.disconnectTimersMu.Unlock()
+		}
 	}
 }
 
@@ -229,7 +260,6 @@ func (h *Hub) HandleSteuerung(msg Message) {
 			h.broadcast(ch, Message{"action": "input", "key": key})
 		}
 		h.broadcast("steuerung", Message{"action": "input", "key": key, "target": target, "steuerungState": steuerungState})
-		h.LogEvent("info", fmt.Sprintf("Eingabe: '%s' -> %s", key, target))
 
 	case "backspace":
 		h.mu.Lock()
@@ -259,11 +289,12 @@ func (h *Hub) HandleSteuerung(msg Message) {
 				}
 			}
 			h.broadcast("steuerung", Message{"action": "backspace", "target": target})
-			h.LogEvent("info", fmt.Sprintf("Loeschen -> %s", target))
 		}
 
 	case "reset":
 		h.mu.Lock()
+		prevLied := h.liedState
+		prevChor := h.chorState
 		if target == "chor" {
 			h.chorState = ""
 		} else {
@@ -276,7 +307,11 @@ func (h *Hub) HandleSteuerung(msg Message) {
 			h.broadcast(ch, Message{"action": "reset"})
 		}
 		h.broadcast("steuerung", Message{"action": "reset", "target": target})
-		h.LogEvent("info", fmt.Sprintf("Reset -> %s", target))
+		if prevLied != "" && prevLied == prevChor {
+			h.LogEvent("info", fmt.Sprintf("Lied %s", prevLied))
+		} else if prevLied == "" && prevChor != "" {
+			h.LogEvent("info", fmt.Sprintf("Chor %s", prevChor))
+		}
 
 	case "settings":
 		if raw, ok := msg["settings"]; ok {

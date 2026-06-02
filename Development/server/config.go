@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"net"
 	"os"
 )
@@ -56,12 +57,30 @@ func detectLANIP() string {
 	if err != nil {
 		return "localhost"
 	}
+	var fallback string
 	for _, addr := range addrs {
-		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
-			if ip4 := ipNet.IP.To4(); ip4 != nil {
-				return ip4.String()
-			}
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok || ipNet.IP.IsLoopback() {
+			continue
 		}
+		ip4 := ipNet.IP.To4()
+		if ip4 == nil {
+			continue
+		}
+		// 169.254.x.x link-local überspringen
+		if ip4[0] == 169 && ip4[1] == 254 {
+			continue
+		}
+		// Private Ranges bevorzugen
+		if ip4[0] == 10 || ip4[0] == 192 || (ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31) {
+			return ip4.String()
+		}
+		if fallback == "" {
+			fallback = ip4.String()
+		}
+	}
+	if fallback != "" {
+		return fallback
 	}
 	return "localhost"
 }
@@ -79,6 +98,12 @@ func loadConfig(path string) (*AppConfig, error) {
 	cfg := defaultConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+	// server_host validieren: kein "localhost" und keine gültige IP → auto-detect und Config korrigieren
+	if cfg.ServerHost != "localhost" && net.ParseIP(cfg.ServerHost) == nil {
+		log.Printf("config: ungültige server_host %q — erkenne LAN-IP automatisch", cfg.ServerHost)
+		cfg.ServerHost = detectLANIP()
+		_ = writeJSON(path, cfg)
 	}
 	return &cfg, nil
 }
