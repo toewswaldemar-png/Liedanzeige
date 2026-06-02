@@ -43,8 +43,7 @@ func main() {
 		title = cfg.Screens[*screenIdx].Name
 	}
 
-	// Jeder Screen braucht ein eigenes WebView2-Datenverzeichnis,
-	// sonst blockiert die zweite Instanz (WebView2 erlaubt pro Ordner nur einen Prozess).
+	// Eindeutiges WebView2-Datenverzeichnis pro Screen-Prozess.
 	webviewDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("liedanzeige-screen-%d", *screenIdx))
 
 	err = wails.Run(&options.App{
@@ -52,7 +51,7 @@ func main() {
 		Width:            width,
 		Height:           height,
 		AlwaysOnTop:      false,
-		Frameless:        !cfg.Dev,
+		Frameless:        false, // Rahmen immer aktiv — wird per Win32 für Vollbild entfernt
 		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 255},
 		AssetServer: &assetserver.Options{
 			Assets: assets,

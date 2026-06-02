@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -20,6 +22,29 @@ type App struct {
 	loadOnce          sync.Once
 	currentMonitorIdx int
 	kioskSend         chan map[string]any
+	isFullscreen      bool
+}
+
+// windowStatePath gibt den Pfad der Zustandsdatei für diesen Screen zurück.
+func windowStatePath(screenIdx int) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("liedanzeige-screen-%d-state.json", screenIdx))
+}
+
+func saveWindowState(screenIdx int, windowed bool) {
+	data, _ := json.Marshal(map[string]bool{"windowed": windowed})
+	_ = os.WriteFile(windowStatePath(screenIdx), data, 0644)
+}
+
+func loadWindowState(screenIdx int) (windowed bool) {
+	data, err := os.ReadFile(windowStatePath(screenIdx))
+	if err != nil {
+		return false
+	}
+	var m map[string]bool
+	if json.Unmarshal(data, &m) == nil {
+		return m["windowed"]
+	}
+	return false
 }
 
 func NewApp(cfg *Config, screenIdx int) *App {
@@ -39,8 +64,6 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// monitorRect gibt den Rect des konfigurierten Monitors zurück.
-// Fällt auf Monitor 0 zurück wenn der Index nicht verfügbar ist.
 func (a *App) monitorRect() (monitorRect, bool) {
 	rects := getMonitorRects()
 	if len(rects) == 0 {
@@ -65,7 +88,6 @@ func (a *App) domReady(ctx context.Context) {
 	})
 }
 
-// screenTargetURL gibt die vollständige URL für den Screen-Index zurück
 func (a *App) screenTargetURL(idx int) string {
 	screenURL := "/lied"
 	if idx < len(a.cfg.Screens) {
@@ -90,7 +112,6 @@ const loadingOverlayJS = `(function(){
   document.body.appendChild(d);
 })()`
 
-// Warten bis der Server erreichbar ist, dann zur Anzeige-URL navigieren
 func (a *App) waitForServerThenLoad() {
 	runtime.WindowExecJS(a.ctx, loadingOverlayJS)
 
@@ -107,32 +128,47 @@ func (a *App) waitForServerThenLoad() {
 		time.Sleep(2 * time.Second)
 	}
 
-	// Dieses Fenster navigieren
 	targetURL := a.screenTargetURL(a.screenIdx)
 	log.Printf("[screen %d] Navigiere zu: %s", a.screenIdx, targetURL)
 	runtime.WindowExecJS(a.ctx, fmt.Sprintf("window.location.href = %q", targetURL))
 
 	if !a.cfg.Dev {
 		time.Sleep(300 * time.Millisecond)
-		a.goFullscreen()
+		if loadWindowState(a.screenIdx) {
+			// Letzter bekannter Zustand war Fenstermodus → wiederherstellen
+			a.isFullscreen = false
+			if r, ok := a.monitorRect(); ok {
+				cascade := a.screenIdx * 40
+				setWindowPos(monitorRect{X: r.X + cascade, Y: r.Y + cascade, W: r.W / 2, H: r.H / 2}, false)
+			}
+		} else {
+			a.goFullscreen()
+		}
 	}
 
 	if a.screenIdx == 0 && a.cfg.Dev {
-		// Im Dev-Modus: weitere Screens als Browser-Tab öffnen
 		for i := 1; i < len(a.cfg.Screens); i++ {
 			runtime.BrowserOpenURL(a.ctx, a.screenTargetURL(i))
 		}
 	}
 
-	// Globalen Numpad-Hook nur für den Chor-Bildschirm starten
 	if a.isChorScreen() {
 		a.startNumpadHook()
 	}
 
+	startQuitShortcut(func() {
+		// Quit via Server: Broadcast geht an Supervisor (stopped=true → kein Neustart)
+		// und zurück an diesen Screen (handleKioskCommand → runtime.Quit)
+		select {
+		case a.kioskSend <- map[string]any{"action": "kiosk", "command": "quit"}:
+		default:
+			// Fallback falls WebSocket nicht verbunden: direkt beenden
+			runtime.Quit(a.ctx)
+		}
+	})
 	go a.connectKioskWS()
 }
 
-// WebSocket-Verbindung zum /ws/kiosk Channel (bidirektional)
 func (a *App) connectKioskWS() {
 	url := fmt.Sprintf("ws://%s:%d/ws/kiosk", a.cfg.ServerHost, a.cfg.Port)
 	for {
@@ -183,25 +219,31 @@ func (a *App) connectKioskWS() {
 	}
 }
 
-// goFullscreen setzt Vollbild und meldet den State.
+// goFullscreen entfernt den Fensterrahmen per Win32 und positioniert das Fenster vollbildfüllend.
 func (a *App) goFullscreen() {
-	stopTitleBarHook()
-	runtime.WindowExecJS(a.ctx, `var d=document.getElementById('__kiosk_tb__');if(d)d.remove();`)
+	a.isFullscreen = true
+	saveWindowState(a.screenIdx, false)
+	setWindowFrame(false)
 	if r, ok := a.monitorRect(); ok {
-		setWindowPos(r, true)
+		setWindowPos(r, a.cfg.Kiosk.AlwaysOnTop)
 	}
-	runtime.WindowSetAlwaysOnTop(a.ctx, a.cfg.Kiosk.AlwaysOnTop)
 	select {
 	case a.kioskSend <- map[string]any{"action": "kiosk_state", "fullscreen": true}:
 	default:
 	}
 }
 
-// moveWithBlackout blendet kurz ab, wechselt Monitor und blendet wieder ein.
 func (a *App) moveWithBlackout(r monitorRect) {
 	runtime.WindowExecJS(a.ctx, `window.__kioskBlackout&&window.__kioskBlackout(true)`)
 	time.Sleep(50 * time.Millisecond)
-	setWindowPos(r, true)
+	if a.isFullscreen {
+		setWindowPos(r, a.cfg.Kiosk.AlwaysOnTop)
+	} else {
+		// Fenstermodus: halbe Monitorgröße, kein Topmost, Rahmen bleibt
+		cascade := a.screenIdx * 40
+		wr := monitorRect{X: r.X + cascade, Y: r.Y + cascade, W: r.W / 2, H: r.H / 2}
+		setWindowPos(wr, false)
+	}
 	time.Sleep(80 * time.Millisecond)
 	runtime.WindowExecJS(a.ctx, `window.__kioskBlackout&&window.__kioskBlackout(false)`)
 }
@@ -211,39 +253,25 @@ func (a *App) handleKioskCommand(msg map[string]any) {
 	switch cmd {
 	case "fullscreen":
 		go a.goFullscreen()
+
 	case "windowed":
+		a.isFullscreen = false
+		saveWindowState(a.screenIdx, true)
 		select {
 		case a.kioskSend <- map[string]any{"action": "kiosk_state", "fullscreen": false}:
 		default:
 		}
 		go func() {
 			runtime.WindowSetAlwaysOnTop(a.ctx, false)
-			time.Sleep(150 * time.Millisecond)
+			// Rahmen wiederherstellen → echte Windows-Titelleiste erscheint
+			setWindowFrame(true)
+			time.Sleep(100 * time.Millisecond)
 			if r, ok := a.monitorRect(); ok {
 				cascade := a.screenIdx * 40
 				setWindowPos(monitorRect{X: r.X + cascade, Y: r.Y + cascade, W: r.W / 2, H: r.H / 2}, false)
 			}
-			startTitleBarHook()
-			runtime.WindowExecJS(a.ctx, `
-				(function(){
-					if(document.getElementById('__kiosk_tb__')) return;
-					var d=document.createElement('div');
-					d.id='__kiosk_tb__';
-					d.style.cssText='position:fixed;top:0;left:0;right:0;height:28px;background:rgba(20,20,20,0.92);z-index:2147483647;display:flex;align-items:center;box-sizing:border-box;backdrop-filter:blur(6px);user-select:none;-webkit-user-select:none;';
-					var title=document.createElement('span');
-					title.style.cssText='flex:1;padding:0 12px;color:rgba(255,255,255,0.6);font-size:11px;font-family:system-ui,sans-serif;letter-spacing:0.06em;pointer-events:none;';
-					title.textContent='Liedanzeige';
-					d.appendChild(title);
-					[['–',false],['□',false],['×',true]].forEach(function(b){
-						var btn=document.createElement('div');
-						btn.style.cssText='width:46px;height:28px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7);font-size:13px;pointer-events:none;';
-						btn.textContent=b[0];
-						d.appendChild(btn);
-					});
-					document.body.appendChild(d);
-				})()
-			`)
 		}()
+
 	case "move_to":
 		screenF, _ := msg["screen"].(float64)
 		if int(screenF) != a.screenIdx {
@@ -256,8 +284,8 @@ func (a *App) handleKioskCommand(msg map[string]any) {
 			return
 		}
 		a.currentMonitorIdx = monitorIdx
-		r := rects[monitorIdx]
-		go a.moveWithBlackout(r)
+		go a.moveWithBlackout(rects[monitorIdx])
+
 	case "next_monitor":
 		rects := getMonitorRects()
 		if len(rects) <= 1 {
@@ -267,6 +295,10 @@ func (a *App) handleKioskCommand(msg map[string]any) {
 		r := rects[a.currentMonitorIdx]
 		log.Printf("[screen %d] Monitor gewechselt → %d (%d,%d)", a.screenIdx, a.currentMonitorIdx, r.X, r.Y)
 		go a.moveWithBlackout(r)
+
+	case "quit":
+		log.Printf("[screen %d] Beende Prozess", a.screenIdx)
+		runtime.Quit(a.ctx)
 	}
 }
 

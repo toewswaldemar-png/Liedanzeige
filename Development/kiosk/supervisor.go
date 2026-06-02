@@ -26,6 +26,7 @@ type managedScreen struct {
 	proc        *exec.Cmd
 	crashCount  int
 	lastCrashAt time.Time
+	stopped     bool // verhindert Neustart nach bewusstem Beenden
 }
 
 func runSupervisor() {
@@ -70,6 +71,13 @@ func runSupervisor() {
 // run startet den Screen-Prozess und überwacht ihn in einer Endlosschleife.
 func (s *managedScreen) run(exePath string) {
 	for {
+		s.mu.Lock()
+		if s.stopped {
+			s.mu.Unlock()
+			return
+		}
+		s.mu.Unlock()
+
 		cmd := exec.Command(exePath, fmt.Sprintf("--screen=%d", s.idx))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -149,8 +157,20 @@ func (sup *supervisor) connectWS() {
 			if json.Unmarshal(data, &msg) != nil {
 				continue
 			}
-			if msg["action"] == "kiosk" && msg["command"] == "reload" {
+			switch {
+			case msg["action"] == "kiosk" && msg["command"] == "reload":
 				go sup.restartAll()
+			case msg["action"] == "kiosk" && msg["command"] == "quit":
+				log.Println("Beende Supervisor und alle Screens...")
+				for _, s := range sup.screens {
+					s.mu.Lock()
+					s.stopped = true
+					if s.proc != nil && s.proc.Process != nil {
+						_ = s.proc.Process.Kill()
+					}
+					s.mu.Unlock()
+				}
+				os.Exit(0)
 			}
 		}
 		conn.Close()

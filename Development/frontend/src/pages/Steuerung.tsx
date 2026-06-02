@@ -142,6 +142,34 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
   const [isFullscreen, setIsFullscreen] = useState(true)
   const kioskCmd = (command: string) => send({ action: 'kiosk', command })
 
+  const [confirmQuit, setConfirmQuit] = useState(false)
+  const confirmQuitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => {
+    if (confirmQuitTimer.current) clearTimeout(confirmQuitTimer.current)
+  }, [])
+
+  useEffect(() => {
+    if (!confirmQuit) return
+    const reset = () => {
+      if (confirmQuitTimer.current) clearTimeout(confirmQuitTimer.current)
+      setConfirmQuit(false)
+    }
+    document.addEventListener('click', reset)
+    return () => document.removeEventListener('click', reset)
+  }, [confirmQuit])
+
+  const handleQuit = useCallback(() => {
+    if (!confirmQuit) {
+      setConfirmQuit(true)
+      confirmQuitTimer.current = setTimeout(() => setConfirmQuit(false), 3000)
+    } else {
+      if (confirmQuitTimer.current) clearTimeout(confirmQuitTimer.current)
+      setConfirmQuit(false)
+      kioskCmd('quit')
+    }
+  }, [confirmQuit, kioskCmd])
+
   const [logOpen, setLogOpen] = useState(false)
   const { entries: logEntries, clear: clearLog } = useLogSocket(kanal === 'lied')
 
@@ -356,8 +384,8 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
                     {isFullscreen ? 'Fenster' : 'Vollbild'}
                   </button>
                   {[
-                    { label: 'Reload',  icon: <RotateCw className="w-4 h-4" />, cmd: 'reload'       },
-                    { label: 'Monitor', icon: <Monitor  className="w-4 h-4" />, cmd: 'swap_monitors' },
+                    { label: 'Reload',   icon: <RotateCw className="w-4 h-4" />, cmd: 'reload'       },
+                    { label: 'Monitor',  icon: <Monitor  className="w-4 h-4" />, cmd: 'swap_monitors' },
                   ].map(({ label, icon, cmd }) => (
                     <button
                       key={cmd}
@@ -368,6 +396,18 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
                       {label}
                     </button>
                   ))}
+                  <button
+                    onClick={e => { e.stopPropagation(); handleQuit() }}
+                    className={cn(
+                      'flex flex-col items-center gap-1.5 rounded-lg border px-2 py-3 text-xs font-medium transition-colors',
+                      confirmQuit
+                        ? 'border-red-400 bg-red-500 text-white hover:bg-red-600'
+                        : 'border-red-200 bg-red-50 text-red-600 hover:bg-red-100 hover:border-red-300'
+                    )}
+                  >
+                    <X className="w-4 h-4" />
+                    {confirmQuit ? 'Wirklich?' : 'Beenden'}
+                  </button>
                 </div>
               </SettingsSection>
 
