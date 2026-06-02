@@ -148,3 +148,12 @@ Key `config.json` fields:
 ```
 
 `dev: false` → kiosk runs fullscreen and always-on-top. `server_host` must be the LAN IP for multi-machine setups. Falls keine `config.json` vorhanden, legt der Kiosk automatisch eine mit Defaults an (`server_host: localhost`, Port 1980). `config.example.json` im Repo-Root ist die Referenzvorlage.
+
+## Offene To-dos
+
+- **Autostart / Installer**: Server und Kiosk starten aktuell manuell. Windows-Dienst für den Server oder zumindest Autostart-Einträge fehlen — für Kircheneinsatz nötig.
+- **build.bat nutzt kein `-skipbindings`**: Wer `build.bat` statt `build-kiosk.bat` aufruft, läuft in den hängenden Wails-Binding-Generator. `build.bat` sollte den Kiosk-Schritt ebenfalls mit `-skipbindings` aufrufen.
+- **DPI-Skalierung auf gemischten Monitoren**: `runtime.WindowSetSize`/`WindowSetPosition` (logische Pixel) und Win32-`SetWindowPos` (physische Pixel) können auf Setups mit unterschiedlicher DPI pro Monitor divergieren → falsche Startposition möglich.
+- **WebView2-DataDir nach unsauberem Beenden**: Bleibt ein gesperrtes `%TEMP%\liedanzeige-screen-N`-Verzeichnis übrig, scheitert WebView2 lautlos (leeres Fenster). Automatisches Aufräumen oder bessere Fehlermeldung im Lade-Overlay wäre hilfreich.
+- **Serversuche bei Ersteinrichtung**: Falscher `server_host` führt zu leerem Kioskfenster ohne klaren Hinweis. Automatische Serversuche (mDNS/Broadcast) oder Fehlermeldung im Lade-Overlay würde Einrichtungsfehler reduzieren.
+- **Kiosk-Screens beim Kill ohne Server**: Supervisor beendet Screen-Prozesse via `Kill()` (kein sauberer Wails-Quit) — WebView2-Zustand könnte unvollständig gespeichert werden. Bisher kein konkretes Problem, aber beobachtenswert.
