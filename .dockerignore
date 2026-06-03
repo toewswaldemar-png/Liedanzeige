@@ -1,0 +1,6 @@
+.git/
+Development/kiosk/
+Development/frontend/node_modules/
+Development/server/static/
+_build/
+*.md

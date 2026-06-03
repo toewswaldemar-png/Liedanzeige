@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -52,12 +51,10 @@ func (t timestampWriter) Write(p []byte) (int, error) {
 }
 
 func setupLogging() {
-	exePath, err := os.Executable()
-	if err != nil {
-		return
-	}
-	logPath := filepath.Join(filepath.Dir(exePath), "server.log")
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	// "server.log" liegt im Arbeitsverzeichnis – konsistent mit config.json/settings.json.
+	// Auf Windows: CWD = Verzeichnis der exe (Explorer-Start / .bat).
+	// In Docker:  CWD = /data  (Volume-Mount).
+	f, err := os.OpenFile("server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Printf("log-datei konnte nicht geoeffnet werden: %v", err)
 		return
