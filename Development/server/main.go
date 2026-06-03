@@ -81,6 +81,7 @@ func main() {
 	}
 
 	ensureFirewallRule(cfg.Port)
+	ensureDiscoveryFirewallRule()
 
 	hub := NewHub(cfg, settings, "settings.json")
 	mux := http.NewServeMux()
@@ -193,6 +194,8 @@ func main() {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+
+	go startDiscoveryListener(cfg.ServerHost, cfg.Port)
 
 	bindAddr := fmt.Sprintf(":%d", cfg.Port)
 	go func() {

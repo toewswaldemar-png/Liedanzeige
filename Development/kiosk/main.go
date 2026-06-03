@@ -44,7 +44,9 @@ func main() {
 	}
 
 	// Eindeutiges WebView2-Datenverzeichnis pro Screen-Prozess.
+	// Aufräumen falls Vorprozess unsauber beendet wurde (verhindert lautloses WebView2-Versagen).
 	webviewDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("liedanzeige-screen-%d", *screenIdx))
+	_ = os.RemoveAll(webviewDataPath)
 
 	err = wails.Run(&options.App{
 		Title:            title,

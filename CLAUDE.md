@@ -152,8 +152,8 @@ Key `config.json` fields:
 ## Offene To-dos
 
 - **Autostart / Installer**: Server und Kiosk starten aktuell manuell. Windows-Dienst für den Server oder zumindest Autostart-Einträge fehlen — für Kircheneinsatz nötig.
-- **build.bat nutzt kein `-skipbindings`**: Wer `build.bat` statt `build-kiosk.bat` aufruft, läuft in den hängenden Wails-Binding-Generator. `build.bat` sollte den Kiosk-Schritt ebenfalls mit `-skipbindings` aufrufen.
+- ~~**build.bat nutzt kein `-skipbindings`**~~: Behoben — `build.bat` ruft jetzt `wails build -skipbindings` auf und räumt `build\bin\` wie `build-kiosk.bat` auf.
 - **DPI-Skalierung auf gemischten Monitoren**: `runtime.WindowSetSize`/`WindowSetPosition` (logische Pixel) und Win32-`SetWindowPos` (physische Pixel) können auf Setups mit unterschiedlicher DPI pro Monitor divergieren → falsche Startposition möglich.
 - **WebView2-DataDir nach unsauberem Beenden**: Bleibt ein gesperrtes `%TEMP%\liedanzeige-screen-N`-Verzeichnis übrig, scheitert WebView2 lautlos (leeres Fenster). Automatisches Aufräumen oder bessere Fehlermeldung im Lade-Overlay wäre hilfreich.
-- **Serversuche bei Ersteinrichtung**: Falscher `server_host` führt zu leerem Kioskfenster ohne klaren Hinweis. Automatische Serversuche (mDNS/Broadcast) oder Fehlermeldung im Lade-Overlay würde Einrichtungsfehler reduzieren.
+- ~~**Serversuche bei Ersteinrichtung**~~: Implementiert via UDP-Broadcast (Port 1981). Kiosk sendet bei `server_host == "localhost"` einen Broadcast, Server antwortet mit seiner IP. Overlay zeigt "Suche Server…" während der Suche.
 - **Kiosk-Screens beim Kill ohne Server**: Supervisor beendet Screen-Prozesse via `Kill()` (kein sauberer Wails-Quit) — WebView2-Zustand könnte unvollständig gespeichert werden. Bisher kein konkretes Problem, aber beobachtenswert.

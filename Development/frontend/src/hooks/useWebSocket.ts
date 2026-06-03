@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import type { WsMessage } from '@/lib/types'
 
 export function useWebSocket(channel: string, enabled = true) {
@@ -25,7 +26,12 @@ export function useWebSocket(channel: string, enabled = true) {
       ws.onmessage = (event) => {
         if (cancelled) return
         try {
-          setLastMessage(JSON.parse(event.data) as WsMessage)
+          // flushSync verhindert React-18-Batching: jede Nachricht bekommt
+          // einen eigenen Render-Zyklus, damit keine Nachricht durch
+          // back-to-back Nachrichten (sync + kiosk_state) übersprungen wird.
+          flushSync(() => {
+            setLastMessage(JSON.parse(event.data) as WsMessage)
+          })
         } catch { /* ignore malformed */ }
       }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -65,6 +66,23 @@ func loadConfig() (*Config, error) {
 
 	// Keine config.json gefunden → anlegen
 	return createDefaultConfig(filepath.Join(exeDir, "config.json"))
+}
+
+func saveConfig(cfg *Config) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	path := filepath.Join(filepath.Dir(exePath), "config.json")
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		log.Printf("config: speichern fehlgeschlagen: %v", err)
+		return
+	}
+	log.Printf("config: server_host aktualisiert → %s", cfg.ServerHost)
 }
 
 func createDefaultConfig(path string) (*Config, error) {

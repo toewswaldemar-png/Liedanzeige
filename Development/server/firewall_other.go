@@ -2,4 +2,5 @@
 
 package main
 
-func ensureFirewallRule(_ int) {}
+func ensureFirewallRule(_ int)    {}
+func ensureDiscoveryFirewallRule() {}

@@ -71,8 +71,10 @@ func detectLANIP() string {
 		if ip4[0] == 169 && ip4[1] == 254 {
 			continue
 		}
-		// Private Ranges bevorzugen
-		if ip4[0] == 10 || ip4[0] == 192 || (ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31) {
+		// Nur echte RFC-1918-Ranges bevorzugen
+		if ip4[0] == 10 ||
+			(ip4[0] == 192 && ip4[1] == 168) ||
+			(ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31) {
 			return ip4.String()
 		}
 		if fallback == "" {

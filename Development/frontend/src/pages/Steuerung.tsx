@@ -61,12 +61,25 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
   const target = kanal
 
   const [display, setDisplay] = useState('')
+  // Trackt Lied- und Chor-State separat für Blockierungslogik
+  const [liedDisplay, setLiedDisplay] = useState('')
+  const [chorDisplay, setChorDisplay] = useState('')
 
   const [settings, setSettings] = useState<DisplaySettings>(loadSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [resetProgress, setResetProgress] = useState(100)
+  const [resetProgress, setResetProgress] = useState(() => {
+    const stored = sessionStorage.getItem('liedanzeige-reset-start')
+    if (!stored) return 100
+    const s = loadSettings()
+    const remaining = Math.max(0, 1 - (Date.now() - parseInt(stored, 10)) / (s.resetDelay * 60 * 1000))
+    return remaining * 100
+  })
   const resetStartRef = useRef<number | null>(null)
   const resetIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // 'sync' = liedDisplay kam vom Server-Sync (Tab-Toggle/Reconnect), 'input' = neue Tasteneingabe
+  const liedDisplaySourceRef = useRef<'sync' | 'input'>('sync')
+  // false solange noch kein sync empfangen — verhindert vorzeitiges Überschreiben von resetProgress
+  const hasSyncRef = useRef(false)
 
   // Fix: send vor toggleKanal deklariert
   const { send, connected, lastMessage } = useWebSocket('steuerung')
@@ -79,14 +92,35 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
     navigate(target === 'lied' ? '/steuerung/chor' : '/steuerung/lied', { replace: true })
   }
 
+  const RESET_START_KEY = 'liedanzeige-reset-start'
+
   useEffect(() => {
     if (resetIntervalRef.current) clearInterval(resetIntervalRef.current)
-    if (display.length === 0 || target !== 'lied') {
-      setResetProgress(100)
+    // Timer nur wenn Lied-Kanal selbst eine Nummer hat — nicht bei Chor-Eingaben
+    if (liedDisplay.length === 0 || target !== 'lied') {
       resetStartRef.current = null
+      if (target !== 'lied' || hasSyncRef.current) {
+        // Chor-Tab ODER Lied-Tab nach erstem Sync (echte Leere = LÖSCHEN):
+        // Fortschritt zurücksetzen und gespeicherten Startzeitpunkt löschen
+        setResetProgress(100)
+        if (target === 'lied') sessionStorage.removeItem(RESET_START_KEY)
+      }
+      // Lied-Tab VOR erstem Sync: resetProgress bleibt bei initialisiertem Wert,
+      // sessionStorage bleibt erhalten bis Sync ankommt
       return
     }
-    resetStartRef.current = Date.now()
+    if (liedDisplaySourceRef.current === 'sync') {
+      // Tab-Toggle / Reconnect: gespeicherten Startzeitpunkt wiederherstellen
+      const stored = sessionStorage.getItem(RESET_START_KEY)
+      resetStartRef.current = stored ? parseInt(stored, 10) : Date.now()
+      // Fortschritt sofort korrekt setzen — nicht auf ersten Interval-Tick warten
+      const remaining = Math.max(0, 1 - (Date.now() - resetStartRef.current) / (settings.resetDelay * 60 * 1000))
+      setResetProgress(remaining * 100)
+    } else {
+      // Neue Tasteneingabe: Startzeitpunkt neu setzen und speichern
+      resetStartRef.current = Date.now()
+      sessionStorage.setItem(RESET_START_KEY, String(resetStartRef.current))
+    }
     const totalMs = settings.resetDelay * 60 * 1000
     resetIntervalRef.current = setInterval(() => {
       if (!resetStartRef.current) return
@@ -94,14 +128,14 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
       if (remaining <= 0) {
         setResetProgress(0)
         clearInterval(resetIntervalRef.current!)
+        sessionStorage.removeItem(RESET_START_KEY)
         send({ action: 'reset', target: 'lied' })
       } else {
         setResetProgress(remaining * 100)
       }
     }, 200)
     return () => clearInterval(resetIntervalRef.current!)
-  // Fix: send in Dependency-Array
-  }, [display, settings.resetDelay, target, send])
+  }, [liedDisplay, settings.resetDelay, target, send])
 
 
   const updateSetting = useCallback(<K extends keyof DisplaySettings>(key: K, value: DisplaySettings[K]): void => {
@@ -127,15 +161,42 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
     if (!lastMessage) return
     const msg = lastMessage
     if (msg.action === 'sync') {
+      hasSyncRef.current = true
       setDisplay(msg.steuerungState ?? msg.liedState ?? '')
+      liedDisplaySourceRef.current = 'sync'
+      setLiedDisplay(msg.liedState ?? '')
+      setChorDisplay(msg.chorState ?? '')
       if (msg.settings) {
         setSettings(msg.settings)
         localStorage.setItem(STORAGE_KEY, JSON.stringify(msg.settings))
       }
     }
-    if (msg.action === 'input')      setDisplay(msg.steuerungState ?? (prev => prev.length >= 4 ? prev : prev + msg.key))
-    if (msg.action === 'backspace')  setDisplay(prev => prev.slice(0, -1))
-    if (msg.action === 'reset')      setDisplay('')
+    if (msg.action === 'input') {
+      setDisplay(msg.steuerungState ?? (prev => prev.length >= 4 ? prev : prev + msg.key))
+      if (msg.target !== 'chor') {
+        // Lied-Eingabe: Server setzt chorState = liedState → beide gleich
+        liedDisplaySourceRef.current = 'input'
+        setLiedDisplay(prev => prev.length >= 4 ? prev : prev + msg.key)
+        setChorDisplay(prev => prev.length >= 4 ? prev : prev + msg.key)
+      } else {
+        // Chor-Eingabe: nur chorDisplay wächst, liedDisplay bleibt
+        setChorDisplay(prev => prev.length >= 4 ? prev : prev + msg.key)
+      }
+    }
+    if (msg.action === 'backspace') {
+      setDisplay(prev => prev.slice(0, -1))
+      if (msg.target !== 'chor') {
+        liedDisplaySourceRef.current = 'input'
+        setLiedDisplay(prev => prev.slice(0, -1))
+        setChorDisplay(prev => prev.slice(0, -1))
+      } else {
+        setChorDisplay(prev => prev.slice(0, -1))
+      }
+    }
+    if (msg.action === 'reset') {
+      setDisplay(''); setLiedDisplay(''); setChorDisplay('')
+      sessionStorage.removeItem('liedanzeige-reset-start')
+    }
     if (msg.action === 'kiosk_state') setIsFullscreen(msg.fullscreen)
   }, [lastMessage])
 
@@ -169,6 +230,11 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
       kioskCmd('quit')
     }
   }, [confirmQuit, kioskCmd])
+
+  // Numpad-Sperre: Chor blockiert wenn Lied aktiv, Lied blockiert wenn Chor eigene Nummer hat
+  const numpadDisabled = target === 'chor'
+    ? liedDisplay.length > 0
+    : chorDisplay.length > 0 && chorDisplay !== liedDisplay
 
   const { entries: logEntries, clear: clearLog } = useLogSocket(kanal === 'lied')
 
@@ -250,8 +316,9 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
               <Button
                 key={k}
                 variant="outline"
-                className="h-full text-4xl font-normal select-none touch-manipulation
-                  transition-all duration-75
+                disabled={numpadDisabled}
+                className="h-full text-4xl font-normal select-none touch-manipulation border-2
+                  transition-[background-color,border-color,color,transform] duration-75
                   hover:border-blue-200 hover:bg-blue-50/60
                   active:scale-95 active:bg-blue-600 active:text-white active:border-blue-600"
                 onClick={() => handleKey(k)}
@@ -261,6 +328,7 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
             ))}
             <Button
               variant="outline"
+              disabled={numpadDisabled}
               className="h-full text-4xl font-normal select-none touch-manipulation
                 transition-all duration-75
                 hover:border-blue-200 hover:bg-blue-50/60
@@ -271,10 +339,10 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
             </Button>
             <Button
               variant="ghost"
-              className="col-span-2 h-full gap-2 text-sm font-semibold tracking-widest select-none touch-manipulation rounded-md border
+              className="col-span-2 h-full gap-2 text-sm font-semibold tracking-widest select-none touch-manipulation rounded-md border-2
                 bg-red-50 text-red-600 border-red-300
                 hover:bg-red-100 hover:text-red-700 hover:border-red-400
-                transition-all duration-75
+                transition-[background-color,border-color,color,transform] duration-75
                 active:scale-95 active:bg-red-600 active:text-white active:border-red-600"
               onClick={handleLoeschen}
             >

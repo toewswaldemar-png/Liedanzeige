@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -108,32 +107,36 @@ func (a *App) screenTargetURL(idx int) string {
 }
 
 const loadingOverlayJS = `(function(){
-  var s = document.createElement('style');
-  s.textContent = '@keyframes spin{to{transform:rotate(360deg)}}@keyframes fade{0%,100%{opacity:.4}50%{opacity:1}}';
+  var s=document.createElement('style');
+  s.textContent='@keyframes spin{to{transform:rotate(360deg)}}@keyframes fade{0%,100%{opacity:.4}50%{opacity:1}}';
   document.head.appendChild(s);
-  var d = document.createElement('div');
-  d.id = 'kiosk-loading';
-  d.style.cssText = 'position:fixed;inset:0;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;z-index:9999;';
-  d.innerHTML =
-    '<div style="width:56px;height:56px;border:4px solid #ddd;border-top-color:#555;border-radius:50%;animation:spin 1s linear infinite"></div>' +
-    '<span style="font-family:sans-serif;font-size:16px;color:#000;animation:fade 2s ease-in-out infinite">Verbinde mit Server…</span>';
+  var d=document.createElement('div');
+  d.id='kiosk-loading';
+  d.style.cssText='position:fixed;inset:0;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;z-index:9999;';
+  d.innerHTML='<div style="width:56px;height:56px;border:4px solid #ddd;border-top-color:#555;border-radius:50%;animation:spin 1s linear infinite"></div><span id="kiosk-status" style="font-family:sans-serif;font-size:16px;color:#000;animation:fade 2s ease-in-out infinite">Verbinde mit Server…</span>';
   document.body.appendChild(d);
+  window.__kioskSetStatus=function(m){var e=document.getElementById('kiosk-status');if(e)e.textContent=m;};
 })()`
 
 func (a *App) waitForServerThenLoad() {
 	runtime.WindowExecJS(a.ctx, loadingOverlayJS)
 
-	healthURL := fmt.Sprintf("http://%s:%d/health", a.cfg.ServerHost, a.cfg.Port)
 	for {
-		resp, err := http.Get(healthURL)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				break
-			}
+		if quickHealthCheck(a.cfg.ServerHost, a.cfg.Port, 2*time.Second) {
+			break
 		}
-		log.Println("Warte auf Server...")
-		time.Sleep(2 * time.Second)
+		runtime.WindowExecJS(a.ctx, fmt.Sprintf("window.__kioskSetStatus(%q)", "Suche Server…"))
+		log.Printf("discovery: %s:%d nicht erreichbar — suche via UDP-Broadcast...", a.cfg.ServerHost, a.cfg.Port)
+		if host, port, ok := discoverServer(3 * time.Second); ok {
+			log.Printf("discovery: Server gefunden — %s:%d", host, port)
+			a.cfg.ServerHost = host
+			a.cfg.Port = port
+			saveConfig(a.cfg)
+		} else {
+			log.Println("Warte auf Server...")
+			time.Sleep(2 * time.Second)
+		}
+		runtime.WindowExecJS(a.ctx, fmt.Sprintf("window.__kioskSetStatus(%q)", "Verbinde mit Server…"))
 	}
 
 	targetURL := a.screenTargetURL(a.screenIdx)
@@ -227,6 +230,7 @@ func (a *App) goFullscreen() {
 	a.isFullscreen = true
 	saveWindowState(a.screenIdx, false)
 	setWindowFrame(false)
+	runtime.WindowSetAlwaysOnTop(a.ctx, a.cfg.Kiosk.AlwaysOnTop)
 	if r, ok := a.monitorRect(); ok {
 		setWindowPos(r, a.cfg.Kiosk.AlwaysOnTop)
 	}
