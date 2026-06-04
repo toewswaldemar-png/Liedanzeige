@@ -24,6 +24,8 @@ const (
 	pingPeriod = 30 * time.Second
 )
 
+var version = "dev"
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
@@ -86,6 +88,12 @@ func main() {
 	// Health-Check
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("ok"))
+	})
+
+	// Version
+	mux.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"version":%q}`, version)
 	})
 
 	// WebSocket /ws/{channel}
@@ -181,7 +189,7 @@ func main() {
 	fileServer := http.FileServer(http.FS(staticFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			serveLandingPage(w, r, cfg)
+			serveLandingPage(w, r, cfg, version)
 			return
 		}
 		path := strings.TrimPrefix(r.URL.Path, "/")

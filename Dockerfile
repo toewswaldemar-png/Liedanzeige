@@ -11,6 +11,7 @@ RUN npm run build
 
 # ── Stage 2: Go-Server ────────────────────────────────────────────────────────
 FROM golang:1.22-alpine AS builder
+ARG VERSION=dev
 WORKDIR /build
 COPY Development/server/go.mod Development/server/go.sum ./
 RUN go mod download
@@ -18,7 +19,7 @@ COPY Development/server/ .
 # Eingebettete statische Dateien aus Stage 1
 COPY --from=frontend /workspace/Development/server/static ./static/
 RUN CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o liedanzeige .
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o liedanzeige .
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 FROM alpine:3.20

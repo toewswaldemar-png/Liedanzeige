@@ -5,9 +5,9 @@ import (
 	"net/http"
 )
 
-func serveLandingPage(w http.ResponseWriter, _ *http.Request, cfg *AppConfig) {
+func serveLandingPage(w http.ResponseWriter, _ *http.Request, cfg *AppConfig, ver string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, landingPageHTML, cfg.ServerHost, cfg.Port)
+	fmt.Fprintf(w, landingPageHTML, cfg.ServerHost, cfg.Port, ver)
 }
 
 const landingPageHTML = `<!DOCTYPE html>
@@ -97,7 +97,7 @@ const landingPageHTML = `<!DOCTYPE html>
 <body>
   <header>
     <h1>Liedanzeige</h1>
-    <p>%s:%d</p>
+    <p>%s:%d &nbsp;·&nbsp; <span style="color:#a1a1aa">%s</span></p>
   </header>
 
   <div class="grid">
