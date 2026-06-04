@@ -1,47 +1,82 @@
-# Uhr v2 — Go + React/TS/Tailwind/shadcn
+# Liedanzeige — Go + React/TS/Tailwind/shadcn
+
+Kirchliches Anzeigesystem für Lied- und Chornummern sowie eine Uhr auf Präsentationsbildschirmen.
+
+## Komponenten
+
+| Verzeichnis | Beschreibung |
+|-------------|--------------|
+| `Development/server/` | Go HTTP + WebSocket Server (Port 1980); bettet Frontend zur Compile-Zeit ein |
+| `Development/frontend/` | React 19 + TypeScript + Tailwind + shadcn/ui SPA (Vite) |
+| `Development/kiosk/` | Go Kiosk-App (kein Wails); Win32 + WebView2 direkt via `go-webview2` |
 
 ## Voraussetzungen
 
-1. **Go** installieren: https://go.dev/dl/ (v1.22+)
-2. **Wails** installieren (nach Go): `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
-3. **Node.js** v18+ (bereits vorhanden)
+- **Go** v1.22+: https://go.dev/dl/
+- **Node.js** v18+
+- **goversioninfo** (für Windows-Icon-Einbettung): `go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest`
 
-## Starten
+## Build
 
-### Server (Go)
-```bash
-cd server
-go mod tidy          # einmalig: Dependencies herunterladen
-go run .
+### Alles auf einmal
+```bat
+build.bat
 ```
-Server läuft auf http://localhost:1980
 
-### Frontend (Dev-Modus)
-```bash
-cd frontend
-npm run dev
+### Nur Server (Frontend + Go)
+```bat
+build-server.bat
 ```
-Dev-Server auf http://localhost:5173 (Proxy zu :1980)
 
-### Frontend (Produktions-Build)
-```bash
-cd frontend
-npm run build        # Output → ../static/
+### Nur Kiosk
+```bat
+build-kiosk.bat
 ```
-Danach wird das Frontend vom Go-Server unter http://localhost:1980 serviert.
+
+Ausgabe in `_build/`:
+```
+_build/
+├── Server/
+│   └── Liedanzeige.exe
+└── Kiosk/
+    └── Kiosk.exe
+```
+
+> **Hinweis:** Der Go-Server bettet das Frontend per `//go:embed static` ein. Nach Frontend-Änderungen muss der Server neu gebaut werden — `npm run build` allein reicht nicht. `build-server.bat` erledigt beides in einem Schritt.
+
+## Entwicklung (einzelne Komponenten)
+
+```bash
+cd Development/server && go run .
+cd Development/frontend && npm run dev   # :5173, Proxy → :1980
+cd Development/kiosk && go run .         # Windows only; Server muss laufen
+```
 
 ## URLs
-- Steuerung:   http://localhost:1980/steuerung
-- Liedanzeige: http://localhost:1980/liedanzeige?kanal=lied
-- Choranzeige: http://localhost:1980/liedanzeige?kanal=chor
-- Health:      http://localhost:1980/health
 
-## Projektstruktur
+| URL | Zweck |
+|-----|-------|
+| `http://localhost:1980/` | Startseite mit allen Links |
+| `http://localhost:1980/steuerung/lied` | Steuerung Liedanzeige |
+| `http://localhost:1980/steuerung/chor` | Steuerung Choranzeige |
+| `http://localhost:1980/lied` | Liedanzeige (Beamer) |
+| `http://localhost:1980/chor` | Choranzeige (Beamer) |
+| `http://localhost:1980/health` | Health-Check |
+
+## Konfiguration
+
+`config.json` im jeweiligen `_build/`-Unterordner ablegen. Vorlage: `config.example.json` im Repo-Root.
+
+Wichtige Felder:
+```json
+{
+  "server_host": "192.168.1.100",
+  "port": 1980,
+  "screens": [
+    { "name": "liedanzeige", "url": "/lied",  "monitor": 1 },
+    { "name": "choranzeige", "url": "/chor",  "monitor": 0 }
+  ]
+}
 ```
-Uhr-v2/
-├── config.yaml       # Server-Konfiguration
-├── server/           # Go HTTP/WebSocket-Server
-├── kiosk/            # Wails Kiosk-App (TODO nach Go-Installation)
-├── frontend/         # React + TS + Tailwind + shadcn/ui
-└── static/           # Vite Build-Output (von Go serviert)
-```
+
+`server_host` muss die LAN-IP sein bei Mehrrechnerbetrieb. Ohne `config.json` startet der Kiosk mit Defaults (`localhost:1980`).
