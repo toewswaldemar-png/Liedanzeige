@@ -1,0 +1,17 @@
+{
+  "FixedFileInfo": {
+    "FileVersion": { "Major": 1, "Minor": 0, "Patch": 0, "Build": 0 },
+    "ProductVersion": { "Major": 1, "Minor": 0, "Patch": 0, "Build": 0 }
+  },
+  "StringFileInfo": {
+    "CompanyName": "",
+    "FileDescription": "Liedanzeige Kiosk",
+    "InternalName": "Kiosk",
+    "LegalCopyright": "",
+    "OriginalFilename": "Kiosk.exe",
+    "ProductName": "Liedanzeige"
+  },
+  "VarFileInfo": { "Translation": { "LangID": "0407", "CharsetID": "04B0" } },
+  "IconPath": "build/windows/icon.ico",
+  "ManifestPath": "build/windows/kiosk.exe.manifest"
+}
