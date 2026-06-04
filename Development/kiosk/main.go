@@ -1,29 +1,21 @@
+//go:build windows
+
 package main
 
 import (
-	"embed"
-	"flag"
-	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
-
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	"runtime"
+	"sync"
 )
 
-//go:embed all:frontend/dist
-var assets embed.FS
-
 func main() {
-	screenIdx := flag.Int("screen", -1, "Screen-Index in config.screens; ohne Flag → Supervisor-Modus")
-	flag.Parse()
-
-	if *screenIdx < 0 {
-		runSupervisor()
-		return
+	exePath, _ := os.Executable()
+	exeDir := filepath.Dir(exePath)
+	if f, err := os.OpenFile(filepath.Join(exeDir, "kiosk.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+		log.SetOutput(io.MultiWriter(os.Stdout, f))
 	}
 
 	cfg, err := loadConfig()
@@ -31,45 +23,29 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	app := NewApp(cfg, *screenIdx)
-
-	width, height := 1920, 1080
-	if cfg.Dev {
-		width, height = 800, 600
+	count := len(cfg.Screens)
+	if count == 0 {
+		count = 1
 	}
 
-	title := "Liedanzeige"
-	if *screenIdx < len(cfg.Screens) {
-		title = cfg.Screens[*screenIdx].Name
+	quit := make(chan struct{})
+	var once sync.Once
+	closeAll := func() {
+		once.Do(func() { close(quit) })
 	}
 
-	// Eindeutiges WebView2-Datenverzeichnis pro Screen-Prozess.
-	// Aufräumen falls Vorprozess unsauber beendet wurde (verhindert lautloses WebView2-Versagen).
-	webviewDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("liedanzeige-screen-%d", *screenIdx))
-	_ = os.RemoveAll(webviewDataPath)
+	startQuitShortcut(closeAll)
 
-	err = wails.Run(&options.App{
-		Title:            title,
-		Width:            width,
-		Height:           height,
-		StartHidden:      !cfg.Dev, // Fenster erst nach Positionierung anzeigen → kein Größensprung
-		AlwaysOnTop:      false,
-		Frameless:        false, // Rahmen immer aktiv — wird per Win32 für Vollbild entfernt
-		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 255},
-		AssetServer: &assetserver.Options{
-			Assets: assets,
-		},
-		OnStartup:                app.startup,
-		OnDomReady:               app.domReady,
-		OnBeforeClose:            app.beforeClose,
-		Bind:                     []interface{}{app},
-		EnableDefaultContextMenu: false,
-		Windows: &windows.Options{
-			WebviewUserDataPath: webviewDataPath,
-		},
-	})
-
-	if err != nil {
-		log.Fatal("Error:", err)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runtime.LockOSThread()
+			runScreen(cfg, i, closeAll, quit)
+		}()
 	}
+
+	wg.Wait()
 }

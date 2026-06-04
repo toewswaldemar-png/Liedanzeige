@@ -30,8 +30,8 @@ var defaultKioskConfig = Config{
 	Port:       1980,
 	Dev:        false,
 	Screens: []Screen{
-		{Name: "liedanzeige", URL: "/lied", Monitor: 1},
-		{Name: "choranzeige", URL: "/chor", Monitor: 0},
+		{Name: "Kiosk - Lied", URL: "/lied", Monitor: 1},
+		{Name: "Kiosk - Chor", URL: "/chor", Monitor: 0},
 	},
 	Kiosk: KioskConfig{AlwaysOnTop: true},
 }

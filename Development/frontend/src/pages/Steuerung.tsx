@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BookOpenText, ExternalLink, Maximize2, Minimize2, Monitor, RotateCw, Settings2, Trash2, X } from 'lucide-react'
+import { BookOpenText, Delete, ExternalLink, Maximize2, Minimize2, Monitor, RotateCw, Settings2, Trash2, X } from 'lucide-react'
 import { useWebSocket } from '@/hooks/useWebSocket'
-import { useLogSocket } from '@/hooks/useLogSocket'
-import { LogPanel } from '@/components/LogPanel'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
@@ -76,8 +74,8 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
   })
   const resetStartRef = useRef<number | null>(null)
   const resetIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  // 'sync' = liedDisplay kam vom Server-Sync (Tab-Toggle/Reconnect), 'input' = neue Tasteneingabe
-  const liedDisplaySourceRef = useRef<'sync' | 'input'>('sync')
+  // 'sync' = Tab-Toggle/Reconnect, 'input' = neue Tasteneingabe, 'backspace' = Ziffer gelöscht
+  const liedDisplaySourceRef = useRef<'sync' | 'input' | 'backspace'>('sync')
   // false solange noch kein sync empfangen — verhindert vorzeitiges Überschreiben von resetProgress
   const hasSyncRef = useRef(false)
 
@@ -105,6 +103,11 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
         setResetProgress(100)
         if (target === 'lied') sessionStorage.removeItem(RESET_START_KEY)
       }
+      // Chor-Tab: sessionStorage löschen wenn liedDisplay leer UND Sync bereits empfangen —
+      // damit Lied-Tab beim Zurückwechseln mit 100% startet statt eingefroren
+      if (target !== 'lied' && liedDisplay.length === 0 && hasSyncRef.current) {
+        sessionStorage.removeItem(RESET_START_KEY)
+      }
       // Lied-Tab VOR erstem Sync: resetProgress bleibt bei initialisiertem Wert,
       // sessionStorage bleibt erhalten bis Sync ankommt
       return
@@ -116,6 +119,9 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
       // Fortschritt sofort korrekt setzen — nicht auf ersten Interval-Tick warten
       const remaining = Math.max(0, 1 - (Date.now() - resetStartRef.current) / (settings.resetDelay * 60 * 1000))
       setResetProgress(remaining * 100)
+    } else if (liedDisplaySourceRef.current === 'backspace') {
+      // Ziffer gelöscht: Timer läuft weiter, kein Neustart
+      // resetStartRef.current bleibt unverändert
     } else {
       // Neue Tasteneingabe: Startzeitpunkt neu setzen und speichern
       resetStartRef.current = Date.now()
@@ -147,10 +153,22 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
     })
   }, [send])
 
+  // Numpad-Sperre: Chor blockiert wenn Lied aktiv, Lied blockiert wenn Chor eigene Nummer hat
+  const numpadDisabled = target === 'chor'
+    ? liedDisplay.length > 0
+    : chorDisplay.length > 0 && chorDisplay !== liedDisplay
+
   const handleKey = useCallback((key: string) => {
     if (display.length >= 4) return
     send({ action: 'input', key, target })
   }, [display, target, send])
+
+  const handleBackspace = useCallback(() => {
+    const effectiveTarget = numpadDisabled
+      ? (target === 'chor' ? 'lied' : 'chor')
+      : target
+    send({ action: 'backspace', target: effectiveTarget })
+  }, [numpadDisabled, target, send])
 
   const handleLoeschen = useCallback(() => {
     send({ action: 'reset', target: 'lied' })
@@ -186,7 +204,7 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
     if (msg.action === 'backspace') {
       setDisplay(prev => prev.slice(0, -1))
       if (msg.target !== 'chor') {
-        liedDisplaySourceRef.current = 'input'
+        liedDisplaySourceRef.current = 'backspace'
         setLiedDisplay(prev => prev.slice(0, -1))
         setChorDisplay(prev => prev.slice(0, -1))
       } else {
@@ -231,12 +249,6 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
     }
   }, [confirmQuit, kioskCmd])
 
-  // Numpad-Sperre: Chor blockiert wenn Lied aktiv, Lied blockiert wenn Chor eigene Nummer hat
-  const numpadDisabled = target === 'chor'
-    ? liedDisplay.length > 0
-    : chorDisplay.length > 0 && chorDisplay !== liedDisplay
-
-  const { entries: logEntries, clear: clearLog } = useLogSocket(kanal === 'lied')
 
   return (
     <div className="flex flex-col h-svh bg-background">
@@ -283,7 +295,7 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
 
           {/* Display */}
           <div className={cn(
-            'rounded-xl border-2 px-6 py-4 transition-colors duration-200 shrink-0',
+            'relative rounded-xl border-2 px-6 py-4 transition-colors duration-200 shrink-0 overflow-hidden',
             display.length > 0
               ? 'border-blue-500 bg-blue-50'
               : 'border-input bg-transparent'
@@ -298,17 +310,15 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
                 </div>
               ))}
             </div>
+            {target === 'lied' && (
+              <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-100">
+                <div
+                  className="h-full bg-blue-400 transition-[width] duration-200 ease-linear"
+                  style={{ width: `${resetProgress}%` }}
+                />
+              </div>
+            )}
           </div>
-
-          {/* Auto-Reset Fortschrittsbalken (nur Liedanzeige) */}
-          {target === 'lied' && (
-            <div className="h-1.5 rounded-full bg-zinc-100 overflow-hidden shrink-0">
-              <div
-                className="h-full rounded-full bg-blue-400 transition-[width] duration-200 ease-linear"
-                style={{ width: `${resetProgress}%` }}
-              />
-            </div>
-          )}
 
           {/* Numpad */}
           <div className="grid grid-cols-3 gap-2 flex-1" style={{ gridTemplateRows: 'repeat(4, 1fr)' }}>
@@ -329,8 +339,8 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
             <Button
               variant="outline"
               disabled={numpadDisabled}
-              className="h-full text-4xl font-normal select-none touch-manipulation
-                transition-all duration-75
+              className="h-full text-4xl font-normal select-none touch-manipulation border-2
+                transition-[background-color,border-color,color,transform] duration-75
                 hover:border-blue-200 hover:bg-blue-50/60
                 active:scale-95 active:bg-blue-600 active:text-white active:border-blue-600"
               onClick={() => handleKey('0')}
@@ -339,15 +349,25 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
             </Button>
             <Button
               variant="ghost"
-              className="col-span-2 h-full gap-2 text-sm font-semibold tracking-widest select-none touch-manipulation rounded-md border-2
+              className="h-full select-none touch-manipulation rounded-md border-2
+                bg-amber-50 text-amber-600 border-amber-300
+                hover:bg-amber-100 hover:text-amber-700 hover:border-amber-400
+                transition-[background-color,border-color,color,transform] duration-75
+                active:scale-95 active:bg-amber-500 active:text-white active:border-amber-500"
+              onClick={handleBackspace}
+            >
+              <Delete className="size-10" strokeWidth={1.5} />
+            </Button>
+            <Button
+              variant="ghost"
+              className="h-full select-none touch-manipulation rounded-md border-2
                 bg-red-50 text-red-600 border-red-300
                 hover:bg-red-100 hover:text-red-700 hover:border-red-400
                 transition-[background-color,border-color,color,transform] duration-75
                 active:scale-95 active:bg-red-600 active:text-white active:border-red-600"
               onClick={handleLoeschen}
             >
-              <Trash2 className="w-4 h-4" />
-              LÖSCHEN
+              <Trash2 className="size-10" strokeWidth={1.5} />
             </Button>
           </div>
 
@@ -392,6 +412,11 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
                   label="Schriftgröße" value={`${settings.timeSize} %`}
                   min={10} max={100} step={1} sliderValue={settings.timeSize}
                   onChange={v => updateSetting('timeSize', v)}
+                />
+                <SliderRow
+                  label="Uhrzeit unter Zahl" value={`${settings.subClockSize} %`}
+                  min={10} max={100} step={1} sliderValue={settings.subClockSize}
+                  onChange={v => updateSetting('subClockSize', v)}
                 />
                 <SliderRow
                   label="Abstand Uhrzeit–Datum" value={`${settings.gapTimeDate} %`}
@@ -487,12 +512,6 @@ export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
                 </div>
               </SettingsSection>
 
-              {/* ── Server-Log ── */}
-              {target === 'lied' && (
-                <div className="rounded-xl overflow-hidden border border-zinc-200 shadow-sm">
-                  <LogPanel entries={logEntries} onClear={clearLog} />
-                </div>
-              )}
 
             </div>
           </div>

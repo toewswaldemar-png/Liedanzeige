@@ -146,18 +146,18 @@ func numpadHookProc(nCode, wParam, lParam uintptr) uintptr {
 	return ret
 }
 
-// isChorScreen prüft ob der aktuelle Screen der Chor-Bildschirm ist
-func (a *App) isChorScreen() bool {
-	if a.screenIdx >= len(a.cfg.Screens) {
+// isChorScreen prüft ob der aktuelle Screen der Chor-Bildschirm ist.
+func (s *screenState) isChorScreen() bool {
+	if s.idx >= len(s.cfg.Screens) {
 		return false
 	}
-	return strings.Contains(a.cfg.Screens[a.screenIdx].URL, "chor")
+	return strings.Contains(s.cfg.Screens[s.idx].URL, "chor")
 }
 
 // startNumpadHook registriert einen globalen Low-Level-Keyboard-Hook und leitet
 // Numpad-Eingaben direkt per WebSocket an den Server weiter — unabhängig vom Fensterfokus.
-func (a *App) startNumpadHook() {
-	wsURL := fmt.Sprintf("ws://%s:%d/ws/steuerung", a.cfg.ServerHost, a.cfg.Port)
+func (s *screenState) startNumpadHook() {
+	wsURL := fmt.Sprintf("ws://%s:%d/ws/steuerung", s.cfg.ServerHost, s.cfg.Port)
 
 	// WS-Verbindung halten und Nachrichten aus numpadChan senden
 	go func() {

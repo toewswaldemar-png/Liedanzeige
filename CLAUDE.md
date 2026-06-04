@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `Development/server/` — Go HTTP + WebSocket server (port 1980); embeds `server/static/` at build time
 - `Development/frontend/` — React 19 + TypeScript + Tailwind + shadcn/ui SPA (Vite); builds to `server/static/`
-- `Development/kiosk/` — Wails desktop app; ohne `--screen`-Flag läuft es als Supervisor (startet und überwacht alle Screens), mit `--screen=N` als Kiosk-Fenster
+- `Development/kiosk/` — Go-Kiosk (kein Wails); ein Prozess mit zwei Win32-Fenstern, je ein WebView2-Controller pro Screen; `github.com/jchv/go-webview2` direkt
 
 Source lives entirely in `Development/`. There are no tests in this codebase.
 
@@ -22,7 +22,7 @@ build-kiosk.bat    :: nur Kiosk
 ```
 `npm install` wird automatisch nachgeholt wenn `frontend/node_modules/` fehlt. Alle Skripte pausieren bei Fehler.
 
-> **Kiosk-Build:** `build-kiosk.bat` ruft `wails build -skipbindings` auf. Der Wails-Binding-Generator hängt sich auf diesem System auf; `-skipbindings` überspringt ihn sicher, da sich die gebundenen Go-Typen selten ändern. Wails legt die EXE zunächst in `Development/kiosk/build/bin/` ab — das Skript kopiert sie nach `_build/Kiosk/Kiosk.exe` und löscht `build/bin/` danach automatisch. Das Verzeichnis `Development/kiosk/build/` (Icons, Manifests) bleibt erhalten.
+> **Kiosk-Build:** `build-kiosk.bat` ruft `go get`, `go mod tidy` und `go build -ldflags="-H windowsgui"` auf. Kein Wails mehr — reines `go build`. Ausgabe direkt nach `_build/Kiosk/Kiosk.exe`.
 
 > **Wichtig:** Der Go-Server bettet die Frontend-Dateien per `//go:embed static` zur Compile-Zeit ein. Nach jeder Frontend-Änderung muss deshalb **auch der Go-Server neu gebaut werden** — `npm run build` allein reicht nicht. Schnellster Weg: `build-server.bat` (baut Frontend + Server in einem Schritt).
 
@@ -43,7 +43,7 @@ _build/
 ```bash
 cd Development/server && go run .
 cd Development/frontend && npm run dev   # :5173, proxies /ws → :1980
-cd Development/kiosk && wails dev
+cd Development/kiosk && go run .         # Windows only; requires a running server
 ```
 
 ## Architecture
@@ -91,25 +91,29 @@ The server (`Development/server/hub.go`) maintains a `Hub` with five named chann
 2. **Server Hub** — authoritative at runtime; pushed via `sync` message to new Steuerung clients and via `settings` action to display clients
 3. **`server/settings.json`** — written async on each `settings` WS message; read on restart
 
-### Kiosk (Wails)
+### Kiosk (reines Win32 + WebView2)
 
-`Development/kiosk/main.go` — startet entweder im Supervisor-Modus (kein `--screen`-Flag) oder als Screen-Prozess (`--screen=N`). Produktion: `StartHidden: true` damit das Fenster erst nach der Positionierung sichtbar wird (kein Größensprung). `OnBeforeClose` fängt den X-Button ab.
+Kein Wails. Ein Prozess, zwei Goroutinen mit `runtime.LockOSThread()`, je eine `jchv/go-webview2`-Instanz pro Screen.
 
-`Development/kiosk/app.go` — Lebenszyklus eines Screen-Prozesses:
-1. `startup`: Fenster auf 1/4 Bildschirmgröße setzen, dann `WindowShow` (kein sichtbarer Sprung vom Wails-Default).
-2. `domReady` → `waitForServerThenLoad`: zeigt Lade-Overlay, pollt `/health`, navigiert zur Screen-URL, stellt gespeicherten Fenster-Zustand (Vollbild/Fenster) wieder her.
-3. `startQuitShortcut` + `connectKioskWS` starten nach Navigation.
-4. `OnBeforeClose` (X-Button): `os.Exit(100)` — Supervisor erkennt Exit-Code 100 und beendet alle Screens.
+`Development/kiosk/main.go` — lädt Config, öffnet gemeinsamen `quit`-Channel (via `sync.Once` geschlossen), registriert Strg+Alt+Q, startet für jeden Screen eine Goroutine mit `runScreen`.
 
-`Development/kiosk/supervisor.go` — ohne `--screen`-Flag: startet alle Screen-Prozesse und überwacht sie. Registriert eigenen `WH_KEYBOARD_LL`-Hook für Strg+Alt+Q (unabhängig vom Server). Erkennt Exit-Code 100 eines Screen-Prozesses als bewusstes Beenden und beendet alle anderen Screens + sich selbst. Reagiert außerdem auf `quit`-Befehl via `/ws/kiosk`. `stopped`-Flag je Screen verhindert ungewollten Neustart.
+`Development/kiosk/screen.go` — Lebenszyklus eines Screens:
+1. `webview2.New()` → HWND direkt verfügbar (kein `getOwnHWND`-Hack mehr).
+2. Initiale Positionierung (1/4 Monitorgröße) per `setWindowPosHWND`.
+3. WndProc-Subclassing via `subclassClose` — X-Button schließt alle Screens via `closeAll()`.
+4. Ladeoverlay per `w.Init(loadingOverlayJS)`, dann `w.Navigate("about:blank")`.
+5. Goroutine `waitAndLoad`: pollt `/health`, UDP-Discovery, navigiert zur Screen-URL, stellt Fenster-Zustand wieder her.
+6. `w.Run()` — Message-Loop blockiert bis `w.Terminate()` (ausgelöst durch quit-Channel).
 
-`Development/kiosk/monitor.go` (Windows-only) — Win32 APIs (`EnumDisplayMonitors`, `SetWindowPos`) für Monitor-Erkennung und Vollbild. Calls `window.__kioskBlackout(true/false)` on the WebView to fade during repositioning.
+`Development/kiosk/close_windows.go` (Windows-only) — WndProc-Subclassing für X-Button-Abfang.
 
-`Development/kiosk/quit_shortcut_windows.go` (Windows-only) — globaler `WH_KEYBOARD_LL`-Hook für Strg+Alt+Q. Wird sowohl vom Supervisor als auch von jedem Screen-Prozess registriert.
+`Development/kiosk/monitor.go` (Windows-only) — `setWindowPosHWND` / `setWindowFrameHWND` nehmen HWND direkt entgegen. `getMonitorRects` via `EnumDisplayMonitors`.
 
-`Development/kiosk/numpad.go` (Windows-only, choir screen only) — low-level keyboard hook (`WH_KEYBOARD_LL`) captures numpad globally and forwards to `/ws/steuerung`. Handles NumLock-on and NumLock-off states.
+`Development/kiosk/quit_shortcut_windows.go` (Windows-only) — globaler `WH_KEYBOARD_LL`-Hook für Strg+Alt+Q, eigene Message-Loop auf festem OS-Thread.
 
-The kiosk has a minimal embedded frontend in `Development/kiosk/frontend/dist/index.html` — eine einzelne statische HTML-Datei (kein npm, kein Build-Schritt). Wails bettet sie zur Compile-Zeit ein; die eigentliche Anzeige kommt vom Haupt-Frontend nach Navigation.
+`Development/kiosk/numpad.go` (Windows-only, Chor-Screen) — `WH_KEYBOARD_LL`-Hook leitet Numpad global an `/ws/steuerung` weiter. NumLock-an/aus beide unterstützt.
+
+**Thread-Modell:** Jede Screen-Goroutine hat ihren eigenen OS-Thread (LockOSThread). Win32-Ops (`SetWindowPos`, `SetWindowLongPtr`) sind thread-sicher. WebView2-Ops (`Navigate`, `Eval`) werden via `w.Dispatch(f)` auf den jeweiligen UI-Thread gemarshaled.
 
 #### Fenster-Zustand
 
@@ -152,8 +156,8 @@ Key `config.json` fields:
 ## Offene To-dos
 
 - **Autostart / Installer**: Server und Kiosk starten aktuell manuell. Windows-Dienst für den Server oder zumindest Autostart-Einträge fehlen — für Kircheneinsatz nötig.
-- ~~**build.bat nutzt kein `-skipbindings`**~~: Behoben — `build.bat` ruft jetzt `wails build -skipbindings` auf und räumt `build\bin\` wie `build-kiosk.bat` auf.
-- **DPI-Skalierung auf gemischten Monitoren**: `runtime.WindowSetSize`/`WindowSetPosition` (logische Pixel) und Win32-`SetWindowPos` (physische Pixel) können auf Setups mit unterschiedlicher DPI pro Monitor divergieren → falsche Startposition möglich.
-- **WebView2-DataDir nach unsauberem Beenden**: Bleibt ein gesperrtes `%TEMP%\liedanzeige-screen-N`-Verzeichnis übrig, scheitert WebView2 lautlos (leeres Fenster). Automatisches Aufräumen oder bessere Fehlermeldung im Lade-Overlay wäre hilfreich.
-- ~~**Serversuche bei Ersteinrichtung**~~: Implementiert via UDP-Broadcast (Port 1981). Kiosk sendet bei `server_host == "localhost"` einen Broadcast, Server antwortet mit seiner IP. Overlay zeigt "Suche Server…" während der Suche.
-- **Kiosk-Screens beim Kill ohne Server**: Supervisor beendet Screen-Prozesse via `Kill()` (kein sauberer Wails-Quit) — WebView2-Zustand könnte unvollständig gespeichert werden. Bisher kein konkretes Problem, aber beobachtenswert.
+- ~~**Wails Multi-Prozess / Supervisor**~~: Entfernt. Kiosk läuft jetzt als ein Prozess mit zwei Goroutinen.
+- ~~**DPI-Mischmasch (Wails logisch vs. Win32 physisch)**~~: Entfällt — nur noch `setWindowPosHWND` (Win32, physisch) überall.
+- ~~**WebView2-DataDir Cleanup**~~: `os.RemoveAll` beim Start in `runScreen` räumt alten Zustand auf.
+- ~~**Serversuche bei Ersteinrichtung**~~: Implementiert via UDP-Broadcast (Port 1981).
+- **DPI-Skalierung auf gemischten Monitoren**: `EnumDisplayMonitors` liefert physische Pixel; auf Setups mit DPI-Scaling pro Monitor können die Koordinaten von `SetWindowPos` (physisch) vs. dem was WebView2 erwartet (logical) divergieren — bisher kein konkretes Problem.

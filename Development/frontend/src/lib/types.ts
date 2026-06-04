@@ -1,5 +1,6 @@
 export interface DisplaySettings {
   timeSize: number
+  subClockSize: number
   gapTimeDate: number
   font: string
   resetDelay: number
@@ -28,6 +29,7 @@ export const FONTS = [
 
 export const DEFAULTS: DisplaySettings = {
   timeSize: 75,
+  subClockSize: 75,
   gapTimeDate: 0,
   font: 'segoe-ui',
   resetDelay: 5,

@@ -15,10 +15,11 @@ function levelColor(level: LogEntry['level']) {
 }
 
 export function LogPanel({ entries, onClear }: Props) {
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [entries])
 
   return (
@@ -38,7 +39,7 @@ export function LogPanel({ entries, onClear }: Props) {
       </div>
 
       {/* Eintraege */}
-      <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-0.5">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-2 flex flex-col gap-0.5">
         {entries.length === 0 && (
           <span className="text-zinc-600 text-xs font-mono">Keine Eintraege.</span>
         )}
@@ -50,7 +51,6 @@ export function LogPanel({ entries, onClear }: Props) {
             <span className="break-all">{e.message}</span>
           </div>
         ))}
-        <div ref={bottomRef} />
       </div>
     </div>
   )

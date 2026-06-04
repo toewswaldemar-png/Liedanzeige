@@ -17,7 +17,7 @@ import { STORAGE_KEY, loadSettings } from '@/lib/settings'
 //   - document.fonts.ready: behebt falsche Messung beim ersten Laden (Font noch nicht gecacht)
 //   - document.fonts 'loadingdone': behebt falsche Messung bei neu geladenem Font nach Wechsel
 
-function useScaledText(scale: number, fontKey: string, onHeight?: (h: number) => void) {
+function useScaledText(scale: number, fontKey: string, onHeight?: (h: number) => void, maxHeightPx?: number) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const textRef    = useRef<HTMLDivElement>(null)
   // Optionaler Mess-Anker: wenn belegt, wird dieses Element für die Breitenmessung
@@ -38,12 +38,13 @@ function useScaledText(scale: number, fontKey: string, onHeight?: (h: number) =>
     if (natural <= 0 || available <= 0) return
     const ref100 = parseFloat(getComputedStyle(probe).fontSize) // px-Wert von 100vw
     const maxFit = ref100 * available / natural                  // Schriftgröße die genau 100% füllt
-    const scaled = Math.floor(maxFit * scale / 100)
+    const widthScaled = Math.floor(maxFit * scale / 100)
+    const scaled = maxHeightPx !== undefined ? Math.min(widthScaled, maxHeightPx) : widthScaled
     text.style.fontSize  = `${scaled}px`
     probe.style.fontSize = `${scaled}px`  // probe zurücksetzen
     wrap.style.height    = `${scaled}px`
     onHeight?.(scaled)                    // Höhe nach oben melden (für Gap-Berechnung)
-  }, [scale, fontKey, onHeight])  // fontKey als Dep → rescale wird bei Font-Wechsel neu erzeugt
+  }, [scale, fontKey, onHeight, maxHeightPx])  // fontKey als Dep → rescale wird bei Font-Wechsel neu erzeugt
 
   useEffect(() => {
     window.addEventListener('resize', rescale)
@@ -62,9 +63,9 @@ function useScaledText(scale: number, fontKey: string, onHeight?: (h: number) =>
 
 // ── Subkomponenten ────────────────────────────────────────────────────────────
 
-function ClockFace({ style, scale, fontKey, sizeRef, onHeight }: { style: React.CSSProperties; scale: number; fontKey: string; sizeRef?: string; onHeight?: (h: number) => void }) {
+function ClockFace({ style, scale, fontKey, sizeRef, onHeight, maxHeightPx }: { style: React.CSSProperties; scale: number; fontKey: string; sizeRef?: string; onHeight?: (h: number) => void; maxHeightPx?: number }) {
   const [time, setTime] = useState(() => new Date().toTimeString().slice(0, 5))
-  const { wrapRef, textRef, measureRef, rescale } = useScaledText(scale, fontKey, onHeight)
+  const { wrapRef, textRef, measureRef, rescale } = useScaledText(scale, fontKey, onHeight, maxHeightPx)
 
   useEffect(() => {
     const id = setInterval(() => setTime(new Date().toTimeString().slice(0, 5)), 1000)
@@ -97,9 +98,9 @@ function formatDate(d: Date) {
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`
 }
 
-function DateLine({ style, scale, fontKey, onHeight }: { style: React.CSSProperties; scale: number; fontKey: string; onHeight?: (h: number) => void }) {
+function DateLine({ style, scale, fontKey, onHeight, maxHeightPx }: { style: React.CSSProperties; scale: number; fontKey: string; onHeight?: (h: number) => void; maxHeightPx?: number }) {
   const [date, setDate] = useState(() => formatDate(new Date()))
-  const { wrapRef, textRef, rescale } = useScaledText(scale, fontKey, onHeight)
+  const { wrapRef, textRef, rescale } = useScaledText(scale, fontKey, onHeight, maxHeightPx)
 
   useEffect(() => {
     const now = new Date()
@@ -127,8 +128,8 @@ function DateLine({ style, scale, fontKey, onHeight }: { style: React.CSSPropert
   )
 }
 
-function NumberDisplay({ value, style, scale, fontKey, onHeight }: { value: string; style: React.CSSProperties; scale: number; fontKey: string; onHeight?: (h: number) => void }) {
-  const { wrapRef, textRef, measureRef, rescale } = useScaledText(scale, fontKey, onHeight)
+function NumberDisplay({ value, style, scale, fontKey, onHeight, maxHeightPx }: { value: string; style: React.CSSProperties; scale: number; fontKey: string; onHeight?: (h: number) => void; maxHeightPx?: number }) {
+  const { wrapRef, textRef, measureRef, rescale } = useScaledText(scale, fontKey, onHeight, maxHeightPx)
 
   // Nur bei scale/fontKey rescalen — nicht bei jedem Tastendruck.
   // Größe basiert auf dem Referenz-Inhalt "0000", nicht auf der aktuellen Eingabe.
@@ -205,6 +206,19 @@ export default function Liedanzeige({ kanal }: { kanal: string }) {
   const heightsRef  = useRef({ clockClock: 0, clockDate: 0, inputNum: 0, inputClock: 0 })
   const gapPctRef   = useRef(settings.gapTimeDate)
   const modeRef     = useRef(false) // isInputMode
+
+  const [viewportH, setViewportH] = useState(window.innerHeight)
+  useEffect(() => {
+    const onResize = () => setViewportH(window.innerHeight)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Höhengrenzen: Elemente teilen den Viewport proportional zu ihrer Skalierung
+  const clockModeMaxH = Math.floor(viewportH / 2)
+  const inputTotal    = settings.timeSize + settings.subClockSize
+  const inputNumMaxH  = inputTotal > 0 ? Math.floor(viewportH * settings.timeSize    / inputTotal) : Math.floor(viewportH / 2)
+  const inputClkMaxH  = inputTotal > 0 ? Math.floor(viewportH * settings.subClockSize / inputTotal) : Math.floor(viewportH / 2)
 
   const applyGap = useCallback(() => {
     const h = heightsRef.current
@@ -309,17 +323,16 @@ export default function Liedanzeige({ kanal }: { kanal: string }) {
         {/* Uhrmodus */}
         {!isInputMode && (
           <div className="flex flex-col items-center" style={{ gap: 'var(--gap-time-date)' }}>
-            <ClockFace style={baseStyle} scale={settings.timeSize} fontKey={settings.font} onHeight={onClockClockH} />
-            <DateLine  style={baseStyle} scale={settings.timeSize} fontKey={settings.font} onHeight={onClockDateH} />
+            <ClockFace style={baseStyle} scale={settings.timeSize} fontKey={settings.font} onHeight={onClockClockH} maxHeightPx={clockModeMaxH} />
+            <DateLine  style={baseStyle} scale={settings.timeSize} fontKey={settings.font} onHeight={onClockDateH}  maxHeightPx={clockModeMaxH} />
           </div>
         )}
 
         {/* Eingabemodus: Zahl + verkleinerte Uhr */}
         {isInputMode && (
           <>
-            <NumberDisplay value={inputNumbers} style={baseStyle} scale={settings.timeSize} fontKey={settings.font} onHeight={onInputNumH} />
-            {/* sizeRef="00.00.0000" → selbe Breite wie Datum → Uhr hier gleich groß wie Datum im Uhrmodus */}
-            <ClockFace style={baseStyle} scale={settings.timeSize} fontKey={settings.font} sizeRef="00.00.0000" onHeight={onInputClockH} />
+            <NumberDisplay value={inputNumbers} style={baseStyle} scale={settings.timeSize}    fontKey={settings.font} onHeight={onInputNumH}   maxHeightPx={inputNumMaxH} />
+            <ClockFace                          style={baseStyle} scale={settings.subClockSize} fontKey={settings.font} onHeight={onInputClockH} maxHeightPx={inputClkMaxH} />
           </>
         )}
 

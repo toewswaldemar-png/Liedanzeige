@@ -27,6 +27,7 @@ type AppConfig struct {
 
 type DisplaySettings struct {
 	TimeSize       int    `json:"timeSize"`
+	SubClockSize   int    `json:"subClockSize"`
 	GapTimeDate    int    `json:"gapTimeDate"`
 	Font           string `json:"font"`
 	ShadowStrength int    `json:"shadowStrength"`
@@ -46,6 +47,7 @@ var defaultConfig = AppConfig{
 
 var defaultSettings = DisplaySettings{
 	TimeSize:       75,
+	SubClockSize:   75,
 	GapTimeDate:    0,
 	Font:           "segoe-ui",
 	ShadowStrength: 40,

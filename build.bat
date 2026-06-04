@@ -25,13 +25,10 @@ cd /d "%~dp0Development\server"
 go build -o "%SERVER_DIR%\Liedanzeige.exe" .
 if %errorlevel% neq 0 (echo Server-Build fehlgeschlagen & pause & exit /b 1)
 
-echo === Kiosk bauen (Wails) ===
+echo === Kiosk bauen (Go) ===
 cd /d "%~dp0Development\kiosk"
-wails build -skipbindings
+go build -ldflags="-H windowsgui" -o "%KIOSK_DIR%\Kiosk.exe" .
 if %errorlevel% neq 0 (echo Kiosk-Build fehlgeschlagen & pause & exit /b 1)
-copy /y "build\bin\Kiosk.exe" "%KIOSK_DIR%\Kiosk.exe"
-if %errorlevel% neq 0 (echo Kiosk-Kopieren fehlgeschlagen & pause & exit /b 1)
-rmdir /s /q "build\bin"
 
 echo.
 echo === Fertig ===
