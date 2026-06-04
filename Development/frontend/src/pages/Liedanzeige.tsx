@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { DEFAULTS, FONTS, type DisplaySettings } from '@/lib/types'
 import { STORAGE_KEY, loadSettings } from '@/lib/settings'
+import { useFavicon } from '@/hooks/useFavicon'
 
 // ── Gemeinsamer Rescale-Hook ──────────────────────────────────────────────────
 //
@@ -160,6 +161,7 @@ function NumberDisplay({ value, style, scale, fontKey, onHeight, maxHeightPx }: 
 // ── Hauptkomponente ───────────────────────────────────────────────────────────
 
 export default function Liedanzeige({ kanal }: { kanal: string }) {
+  useFavicon('/kiosk-favicon.svg')
   const [settings, setSettings] = useState<DisplaySettings>(loadSettings)
   const [inputNumbers, setInputNumbers] = useState('')
   const isInputMode = inputNumbers.length > 0

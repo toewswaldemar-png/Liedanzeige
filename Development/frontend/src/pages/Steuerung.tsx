@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useFavicon } from '@/hooks/useFavicon'
 import { BookOpenText, Delete, ExternalLink, Maximize2, Minimize2, Monitor, RotateCw, Settings2, Trash2, X } from 'lucide-react'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { Button } from '@/components/ui/button'
@@ -55,6 +56,7 @@ function SliderRow({
 }
 
 export default function Steuerung({ kanal }: { kanal: 'lied' | 'chor' }) {
+  useFavicon('/lied-favicon.svg')
   const navigate = useNavigate()
   const target = kanal
 
