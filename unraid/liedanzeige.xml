@@ -10,7 +10,7 @@
   <Overview>Digitale Lied- und Choranzeige fuer Gottesdienste. Zeigt Liedtitel und Strophennummern auf Bildschirmen an und wird per Browser gesteuert.</Overview>
   <WebUI>http://[IP]:[PORT:1980]</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/toewswaldemar-png/Liedanzeige/main/unraid/liedanzeige.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/toewswaldemar-png/Liedanzeige/main/unraid/icon.png</Icon>
+  <Icon>https://cdn.jsdelivr.net/gh/toewswaldemar-png/Liedanzeige@main/unraid/icon.png</Icon>
   <Category>Tools:</Category>
   <Description>Digitale Lied- und Choranzeige fuer Gottesdienste. Zeigt Liedtitel und Strophennummern auf Bildschirmen an und wird per Browser gesteuert.</Description>
   <Config
