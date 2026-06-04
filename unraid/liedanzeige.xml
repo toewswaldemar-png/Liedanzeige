@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>liedanzeige</Name>
+  <Repository>ghcr.io/toewswaldemar-png/liedanzeige:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Project>https://github.com/toewswaldemar-png/Liedanzeige</Project>
+  <Overview>Digitale Lied- und Choranzeige fuer Gottesdienste. Zeigt Liedtitel und Strophennummern auf Bildschirmen an und wird per Browser gesteuert.</Overview>
+  <WebUI>http://[IP]:[PORT:1980]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/toewswaldemar-png/Liedanzeige/main/unraid/liedanzeige.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/toewswaldemar-png/Liedanzeige/main/Development/kiosk/build/appicon.png</Icon>
+  <Category>Tools:</Category>
+  <Description>Digitale Lied- und Choranzeige fuer Gottesdienste. Zeigt Liedtitel und Strophennummern auf Bildschirmen an und wird per Browser gesteuert.</Description>
+  <Config
+    Name="Port"
+    Target="1980"
+    Default="1980"
+    Mode="tcp"
+    Description="Port fuer die Web-Oberflaeche und WebSocket"
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">1980</Config>
+  <Config
+    Name="Daten-Verzeichnis"
+    Target="/data"
+    Default="/mnt/user/appdata/liedanzeige"
+    Mode="rw"
+    Description="Speicherort fuer config.json, settings.json und server.log. config.json muss vor dem ersten Start manuell angelegt werden."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/liedanzeige</Config>
+</Container>
